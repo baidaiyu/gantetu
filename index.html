@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260525-1012" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260525-accounts" />
   </head>
   <body>
     <main class="app-shell">
@@ -14,7 +14,7 @@
           <h1>需求投入日历视图</h1>
         </div>
         <div class="header-actions">
-          <label class="role-field">
+          <label class="role-field" hidden>
             <span>当前角色</span>
             <select id="roleSelect">
               <option value="admin">管理员</option>
@@ -25,10 +25,12 @@
               <option value="tester">测试人员</option>
             </select>
           </label>
+          <div class="user-badge" id="currentUserBadge">未登录</div>
           <label class="role-field" id="currentPersonField" hidden>
             <span>当前人员</span>
             <select id="currentPersonSelect"></select>
           </label>
+          <button class="secondary-action" id="accountManageButton" type="button" hidden>账号管理</button>
           <button class="pending-action" id="pendingWorkButton" type="button" hidden>待处理工作（0）</button>
           <button class="secondary-action" id="peopleManageButton" type="button" hidden>人员管理</button>
           <button class="primary-action" id="addRequirementButton" type="button">新增需求</button>
@@ -36,6 +38,7 @@
           <button class="secondary-action" id="addWorkButton" type="button">登记工作</button>
           <button class="secondary-action" id="addOtherWorkButton" type="button" hidden>登记其他工作</button>
           <button class="secondary-action" id="holidayButton" type="button">日历管理</button>
+          <button class="secondary-action" id="logoutButton" type="button">退出登录</button>
         </div>
         <div class="summary-strip" id="summaryStrip"></div>
       </header>
@@ -81,6 +84,29 @@
         </section>
       </section>
     </main>
+
+    <dialog class="config-dialog narrow-dialog" id="loginDialog">
+      <form id="loginForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">账号登录</p>
+            <h2>登录排期平台</h2>
+          </div>
+        </div>
+        <label class="field">
+          <span>账号</span>
+          <input id="loginUsernameInput" required autocomplete="username" placeholder="admin" />
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <input id="loginPasswordInput" required type="password" autocomplete="current-password" placeholder="输入密码" />
+        </label>
+        <div class="dialog-actions">
+          <span class="form-error" id="loginFormError"></span>
+          <button class="primary-action" type="submit">登录</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog class="config-dialog narrow-dialog" id="requirementDialog">
       <form id="requirementForm" method="dialog">
@@ -401,7 +427,60 @@
       </form>
     </dialog>
 
+    <dialog class="config-dialog" id="accountDialog">
+      <form id="accountForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">账号管理</p>
+            <h2>账号与角色</h2>
+          </div>
+          <button class="icon-button" id="closeAccountDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="people-manager">
+          <section class="people-list-panel" aria-label="所有账号">
+            <div class="section-head">
+              <h3>现有账号</h3>
+              <button class="secondary-action compact" id="newAccountButton" type="button">新建账号</button>
+            </div>
+            <div class="people-list" id="accountList"></div>
+          </section>
+          <section class="person-edit-panel" aria-label="编辑账号">
+            <input id="accountId" type="hidden" />
+            <label class="field">
+              <span>登录账号</span>
+              <input id="accountUsernameInput" required placeholder="例如：zhangsan" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>姓名</span>
+              <input id="accountNameInput" required placeholder="例如：张三" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>平台角色</span>
+              <select id="accountRoleInput" required>
+                <option value="leader">领导</option>
+                <option value="pm">产品经理</option>
+                <option value="designer">设计师</option>
+                <option value="developer">研发人员</option>
+                <option value="tester">测试人员</option>
+                <option value="admin">管理员</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>密码</span>
+              <input id="accountPasswordInput" type="password" placeholder="新建必填；编辑时留空则不修改" autocomplete="new-password" />
+            </label>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deleteAccountButton" type="button">删除</button>
+          <span class="form-error" id="accountFormError"></span>
+          <button class="secondary-action" id="cancelAccountButton" type="button">关闭</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260525-1012"></script>
+    <script src="./assets/app.js?v=20260525-accounts"></script>
   </body>
 </html>

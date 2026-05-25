@@ -129,6 +129,19 @@ button {
   box-shadow: 0 8px 24px rgba(184, 117, 18, 0.18);
 }
 
+.user-badge {
+  align-items: center;
+  background: var(--green-soft);
+  border: 1px solid #bde1d2;
+  border-radius: 7px;
+  color: var(--green);
+  display: flex;
+  font-size: 14px;
+  font-weight: 850;
+  min-height: 40px;
+  padding: 0 14px;
+}
+
 .danger-action {
   background: #fff5f4;
   border: 1px solid #ecc0bc;

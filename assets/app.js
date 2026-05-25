@@ -35,6 +35,14 @@ const versionPalette = [
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const calendarWeekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const personRoles = ["领导", "产品经理", "设计师", "研发人员", "测试人员", "管理员"];
+const accountRoles = {
+  admin: "管理员",
+  leader: "领导",
+  pm: "产品经理",
+  designer: "设计师",
+  developer: "研发人员",
+  tester: "测试人员",
+};
 const PM_ASSIGNMENT_CONTENT = "产品经理分配";
 let currentView = "requirement";
 let requirementViewMode = "timeline";
@@ -58,6 +66,9 @@ let workImageDraft = [];
 let otherWorkImageDraft = [];
 let lastSyncedState = null;
 let saveQueue = Promise.resolve();
+let currentUser = null;
+let accounts = [];
+let loginEventsBound = false;
 let pendingDeletes = {
   people: new Set(),
   requirements: new Set(),
@@ -79,10 +90,18 @@ const els = {
   viewModeControl: document.querySelector("#viewModeControl"),
   viewModeButtons: document.querySelectorAll(".mode-button"),
   roleSelect: document.querySelector("#roleSelect"),
+  currentUserBadge: document.querySelector("#currentUserBadge"),
   currentPersonField: document.querySelector("#currentPersonField"),
   currentPersonSelect: document.querySelector("#currentPersonSelect"),
   pendingWorkButton: document.querySelector("#pendingWorkButton"),
   peopleManageButton: document.querySelector("#peopleManageButton"),
+  accountManageButton: document.querySelector("#accountManageButton"),
+  logoutButton: document.querySelector("#logoutButton"),
+  loginDialog: document.querySelector("#loginDialog"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsernameInput: document.querySelector("#loginUsernameInput"),
+  loginPasswordInput: document.querySelector("#loginPasswordInput"),
+  loginFormError: document.querySelector("#loginFormError"),
   toastStack: document.querySelector("#toastStack"),
   addRequirementButton: document.querySelector("#addRequirementButton"),
   addVersionButton: document.querySelector("#addVersionButton"),
@@ -186,6 +205,19 @@ const els = {
   closePeopleDialog: document.querySelector("#closePeopleDialog"),
   cancelPeopleButton: document.querySelector("#cancelPeopleButton"),
   personFormError: document.querySelector("#personFormError"),
+  accountDialog: document.querySelector("#accountDialog"),
+  accountForm: document.querySelector("#accountForm"),
+  accountList: document.querySelector("#accountList"),
+  accountId: document.querySelector("#accountId"),
+  accountUsernameInput: document.querySelector("#accountUsernameInput"),
+  accountNameInput: document.querySelector("#accountNameInput"),
+  accountRoleInput: document.querySelector("#accountRoleInput"),
+  accountPasswordInput: document.querySelector("#accountPasswordInput"),
+  newAccountButton: document.querySelector("#newAccountButton"),
+  closeAccountDialog: document.querySelector("#closeAccountDialog"),
+  cancelAccountButton: document.querySelector("#cancelAccountButton"),
+  deleteAccountButton: document.querySelector("#deleteAccountButton"),
+  accountFormError: document.querySelector("#accountFormError"),
 };
 
 function parseDate(dateText) {
@@ -484,6 +516,41 @@ async function loadRemoteState() {
   }
 }
 
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.error || "请求失败。");
+  return payload;
+}
+
+async function loadSession() {
+  try {
+    const payload = await apiRequest("/api/session", { method: "GET" });
+    return payload.user;
+  } catch {
+    return null;
+  }
+}
+
+async function login(username, password) {
+  const payload = await apiRequest("/api/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+  return payload.user;
+}
+
+async function logout() {
+  await apiRequest("/api/logout", { method: "POST", body: "{}" });
+  window.location.reload();
+}
+
 function currentStatePayload() {
   return {
     people,
@@ -622,6 +689,7 @@ async function saveRemotePatch(patch) {
     throw new Error("无法连接服务器：服务可能未启动或当前网络不可达，本次修改没有保存。");
   }
   const payload = await response.json().catch(() => null);
+  if (response.status === 401) throw new Error("登录已失效，请刷新页面后重新登录。");
   if (!response.ok) throw new Error(payload?.error || "服务器拒绝保存，本次修改没有写入数据库。");
   return payload;
 }
@@ -678,7 +746,8 @@ function isExecutorRole() {
 
 function syncCurrentPersonOptions() {
   const names = workingPeople();
-  const previous = currentPerson || els.currentPersonSelect.value;
+  const lockedName = currentUser && isExecutorRole() ? currentUser.name : "";
+  const previous = lockedName || currentPerson || els.currentPersonSelect.value;
   els.currentPersonSelect.innerHTML = names.length
     ? names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
     : `<option value="">暂无人员</option>`;
@@ -709,7 +778,9 @@ function canEditOwnWork(work) {
 function applyRolePermissions() {
   syncCurrentPersonOptions();
   const showExecutorTools = isExecutorRole();
-  els.currentPersonField.hidden = !showExecutorTools;
+  els.currentPersonField.hidden = true;
+  els.currentUserBadge.textContent = currentUser ? `${currentUser.name} · ${accountRoles[currentUser.role] || currentUser.role}` : "未登录";
+  els.accountManageButton.hidden = currentRole !== "admin";
   els.peopleManageButton.hidden = !canManagePeople();
   els.addRequirementButton.hidden = !canCreateRequirement();
   els.addVersionButton.hidden = !canManageVersion();
@@ -723,7 +794,7 @@ function applyRolePermissions() {
 }
 
 function allPeople() {
-  return people.map((person) => person.name).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  return unique(people.map((person) => person.name).filter(Boolean)).sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
 function personByName(name) {
@@ -1970,6 +2041,96 @@ function deletePerson() {
   render();
 }
 
+async function loadAccounts() {
+  const payload = await apiRequest("/api/accounts", { method: "GET" });
+  accounts = payload.accounts || [];
+  return accounts;
+}
+
+function renderAccountManager(selectedId = els.accountId.value) {
+  els.accountList.innerHTML = accounts.length
+    ? accounts
+        .map(
+          (account) =>
+            `<button class="people-row ${account.id === selectedId ? "is-active" : ""}" type="button" data-action="edit-account" data-id="${account.id}"><span>${escapeHtml(account.username)}</span><b>${escapeHtml(account.name)} · ${escapeHtml(accountRoles[account.role] || account.role)}</b></button>`,
+        )
+        .join("")
+    : `<div class="empty-state people-empty">还没有账号。</div>`;
+}
+
+function clearAccountForm() {
+  els.accountFormError.textContent = "";
+  els.accountId.value = "";
+  els.accountUsernameInput.value = "";
+  els.accountNameInput.value = "";
+  els.accountRoleInput.value = "developer";
+  els.accountPasswordInput.value = "";
+  els.deleteAccountButton.hidden = true;
+  renderAccountManager("");
+}
+
+function editAccount(account) {
+  if (!account) return clearAccountForm();
+  els.accountFormError.textContent = "";
+  els.accountId.value = account.id;
+  els.accountUsernameInput.value = account.username;
+  els.accountNameInput.value = account.name;
+  els.accountRoleInput.value = account.role;
+  els.accountPasswordInput.value = "";
+  els.deleteAccountButton.hidden = account.username === "admin";
+  renderAccountManager(account.id);
+}
+
+async function openAccountDialog() {
+  if (currentRole !== "admin") return;
+  try {
+    await loadAccounts();
+    clearAccountForm();
+    els.accountDialog.showModal();
+  } catch (error) {
+    showToast("error", "账号列表加载失败", error.message);
+  }
+}
+
+async function saveAccount() {
+  const data = {
+    id: els.accountId.value,
+    username: els.accountUsernameInput.value.trim(),
+    name: els.accountNameInput.value.trim(),
+    role: els.accountRoleInput.value,
+    password: els.accountPasswordInput.value,
+  };
+  try {
+    const payload = await apiRequest("/api/accounts", { method: "POST", body: JSON.stringify(data) });
+    accounts = payload.accounts || [];
+    els.accountPasswordInput.value = "";
+    renderAccountManager(data.id);
+    showToast("success", "账号已保存", "账号、角色和人员信息已更新。");
+    const remoteState = await loadRemoteState();
+    if (remoteState) {
+      lastSyncedState = cloneState(remoteState);
+      applyState(remoteState);
+      render();
+    }
+  } catch (error) {
+    els.accountFormError.textContent = error.message;
+  }
+}
+
+async function deleteAccount() {
+  const id = els.accountId.value;
+  const account = accounts.find((item) => item.id === id);
+  if (!account || !confirm(`确认删除账号「${account.username}」吗？`)) return;
+  try {
+    const payload = await apiRequest(`/api/accounts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    accounts = payload.accounts || [];
+    clearAccountForm();
+    showToast("success", "账号已删除", "该账号不能再登录。");
+  } catch (error) {
+    els.accountFormError.textContent = error.message;
+  }
+}
+
 function handleGridClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -2009,7 +2170,13 @@ function handleGridClick(event) {
 }
 
 function render() {
-  currentRole = els.roleSelect.value;
+  if (currentUser) {
+    currentRole = currentUser.role;
+    currentPerson = currentUser.name || "";
+    els.roleSelect.value = currentRole;
+  } else {
+    currentRole = els.roleSelect.value;
+  }
   applyRolePermissions();
   refreshFilters();
   const activeViewMode = currentView === "requirement" ? requirementViewMode : versionViewMode;
@@ -2025,6 +2192,28 @@ function render() {
 }
 
 async function init() {
+  if (!loginEventsBound) {
+    loginEventsBound = true;
+    els.loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      els.loginFormError.textContent = "";
+      try {
+        currentUser = await login(els.loginUsernameInput.value, els.loginPasswordInput.value);
+        window.location.reload();
+      } catch (error) {
+        els.loginFormError.textContent = error.message;
+      }
+    });
+  }
+  currentUser = await loadSession();
+  if (!currentUser) {
+    els.loginUsernameInput.value = "admin";
+    els.loginDialog.showModal();
+    return;
+  }
+  currentRole = currentUser.role;
+  currentPerson = currentUser.name || "";
+  els.roleSelect.value = currentRole;
   const state = await loadState();
   people = (state.people || []).map(normalizePerson).filter((person) => person.name);
   requirements = (state.requirements || []).map(normalizeRequirement);
@@ -2095,6 +2284,8 @@ async function init() {
   els.addWorkButton.addEventListener("click", () => openWorkDialog());
   els.addOtherWorkButton.addEventListener("click", () => openOtherWorkDialog());
   els.peopleManageButton.addEventListener("click", openPeopleDialog);
+  els.accountManageButton.addEventListener("click", openAccountDialog);
+  els.logoutButton.addEventListener("click", logout);
   els.holidayButton.addEventListener("click", openHolidayDialog);
   els.holidayMonthInput.addEventListener("input", () => {
     calendarEditMonth = els.holidayMonthInput.value;
@@ -2173,6 +2364,14 @@ async function init() {
   els.cancelHolidayButton.addEventListener("click", () => els.holidayDialog.close());
   els.closePeopleDialog.addEventListener("click", () => els.peopleDialog.close());
   els.cancelPeopleButton.addEventListener("click", () => els.peopleDialog.close());
+  els.closeAccountDialog.addEventListener("click", () => els.accountDialog.close());
+  els.cancelAccountButton.addEventListener("click", () => els.accountDialog.close());
+  els.newAccountButton.addEventListener("click", clearAccountForm);
+  els.accountList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action='edit-account']");
+    if (!button) return;
+    editAccount(accounts.find((account) => account.id === button.dataset.id));
+  });
   els.newPersonButton.addEventListener("click", clearPersonForm);
   els.peopleList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action='edit-person']");
@@ -2203,6 +2402,10 @@ async function init() {
     event.preventDefault();
     savePerson();
   });
+  els.accountForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveAccount();
+  });
   els.deleteRequirementButton.addEventListener("click", () => {
     deleteRequirementById(els.requirementId.value);
     els.requirementDialog.close();
@@ -2229,6 +2432,7 @@ async function init() {
   });
   els.deleteOtherWorkButton.addEventListener("click", deleteOtherWork);
   els.deletePersonButton.addEventListener("click", deletePerson);
+  els.deleteAccountButton.addEventListener("click", deleteAccount);
   render();
 }
 

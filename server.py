@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 import json
+import hashlib
 import mimetypes
 import os
 import shutil
 import sqlite3
+import secrets
+import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -18,6 +21,16 @@ BACKUP_DIR = DATA_DIR / "safety-backups"
 WRITE_LOG_DIR = DATA_DIR / "write-logs"
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "4174"))
+SESSION_MAX_AGE = 60 * 60 * 24 * 14
+
+ROLE_LABELS = {
+    "admin": "管理员",
+    "leader": "领导",
+    "pm": "产品经理",
+    "designer": "设计师",
+    "developer": "研发人员",
+    "tester": "测试人员",
+}
 
 EMPTY_STATE = {
     "people": [],
@@ -41,6 +54,58 @@ class ClientError(Exception):
     status = 400
 
 
+class AuthError(ClientError):
+    status = 401
+
+
+class ForbiddenError(ClientError):
+    status = 403
+
+
+def hash_password(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000).hex()
+    return f"{salt}${digest}"
+
+
+def verify_password(password, stored):
+    try:
+        salt, expected = stored.split("$", 1)
+    except ValueError:
+        return False
+    actual = hash_password(password, salt).split("$", 1)[1]
+    return secrets.compare_digest(actual, expected)
+
+
+def role_label(role):
+    return ROLE_LABELS.get(role, "研发人员")
+
+
+def account_payload(row):
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "name": row["name"],
+        "role": row["role"],
+        "roleLabel": role_label(row["role"]),
+    }
+
+
+def ensure_person_for_account(conn, account):
+    name = (account.get("name") or "").strip()
+    if not name:
+        return
+    existing = conn.execute("SELECT id FROM people WHERE name = ? LIMIT 1", (name,)).fetchone()
+    person_id = existing["id"] if existing else f"account-{account['id']}"
+    conn.execute(
+        """
+        INSERT INTO people (id, name, role) VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role
+        """,
+        (person_id, name, role_label(account.get("role"))),
+    )
+
+
 def snapshot_data(reason):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -51,11 +116,12 @@ def snapshot_data(reason):
             shutil.copy2(source, target)
 
 
-def log_write_request(method, remote, body):
+def log_write_request(method, remote, user, body):
     WRITE_LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     safe_remote = "".join(char if char.isalnum() or char in ".-_" else "-" for char in remote)[:60]
-    (WRITE_LOG_DIR / f"{stamp}-{method}-{safe_remote}.json").write_text(body or "{}", encoding="utf-8")
+    safe_user = "".join(char if char.isalnum() or char in ".-_" else "-" for char in (user or "anonymous"))[:60]
+    (WRITE_LOG_DIR / f"{stamp}-{method}-{safe_remote}-{safe_user}.json").write_text(body or "{}", encoding="utf-8")
 
 
 def mirror_json():
@@ -220,11 +286,38 @@ def init_db():
             CREATE TABLE IF NOT EXISTS workdays (
               date TEXT PRIMARY KEY
             );
+
+            CREATE TABLE IF NOT EXISTS accounts (
+              id TEXT PRIMARY KEY,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              name TEXT NOT NULL,
+              role TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+              token TEXT PRIMARY KEY,
+              account_id TEXT NOT NULL,
+              expires_at INTEGER NOT NULL,
+              FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
             """
         )
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(work_items)")]
         if "images" not in columns:
             conn.execute("ALTER TABLE work_items ADD COLUMN images TEXT NOT NULL DEFAULT '[]'")
+        if not conn.execute("SELECT 1 FROM accounts WHERE username = ?", ("admin",)).fetchone():
+            admin = {
+                "id": "account-admin",
+                "username": "admin",
+                "name": "管理员",
+                "role": "admin",
+            }
+            conn.execute(
+                "INSERT INTO accounts (id, username, password_hash, name, role) VALUES (?, ?, ?, ?, ?)",
+                (admin["id"], admin["username"], hash_password("wl8430481"), admin["name"], admin["role"]),
+            )
+            ensure_person_for_account(conn, admin)
     migrate_json_if_needed()
 
 
@@ -252,6 +345,96 @@ def has_state_data(state):
     if not isinstance(state, dict):
         return False
     return any(isinstance(state.get(key), list) and state[key] for key in EMPTY_STATE)
+
+
+def list_accounts():
+    with connect() as conn:
+        return [
+            account_payload(row)
+            for row in conn.execute("SELECT id, username, name, role FROM accounts ORDER BY username")
+        ]
+
+
+def get_account_by_session(token):
+    if not token:
+        return None
+    now = int(time.time())
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT accounts.id, accounts.username, accounts.name, accounts.role
+            FROM sessions
+            JOIN accounts ON accounts.id = sessions.account_id
+            WHERE sessions.token = ? AND sessions.expires_at > ?
+            """,
+            (token, now),
+        ).fetchone()
+    return account_payload(row) if row else None
+
+
+def create_session(account_id):
+    token = secrets.token_urlsafe(32)
+    expires_at = int(time.time()) + SESSION_MAX_AGE
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (int(time.time()),))
+        conn.execute("INSERT INTO sessions (token, account_id, expires_at) VALUES (?, ?, ?)", (token, account_id, expires_at))
+        conn.commit()
+    return token
+
+
+def login_account(username, password):
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, username, password_hash, name, role FROM accounts WHERE username = ?",
+            ((username or "").strip(),),
+        ).fetchone()
+    if not row or not verify_password(password or "", row["password_hash"]):
+        raise AuthError("账号或密码错误。")
+    token = create_session(row["id"])
+    return token, account_payload(row)
+
+
+def save_account(data):
+    username = (data.get("username") or "").strip()
+    name = (data.get("name") or "").strip()
+    role = data.get("role") if data.get("role") in ROLE_LABELS else "developer"
+    password = data.get("password") or ""
+    account_id = data.get("id") or f"account-{secrets.token_hex(8)}"
+    if not username or not name:
+        raise ClientError("请填写账号和姓名。")
+    with connect() as conn:
+        existing = conn.execute("SELECT id FROM accounts WHERE username = ? AND id <> ?", (username, account_id)).fetchone()
+        if existing:
+            raise ClientError("这个账号名已经存在。")
+        current = conn.execute("SELECT password_hash FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if current:
+            password_hash = hash_password(password) if password else current["password_hash"]
+            conn.execute(
+                "UPDATE accounts SET username = ?, password_hash = ?, name = ?, role = ? WHERE id = ?",
+                (username, password_hash, name, role, account_id),
+            )
+        else:
+            if not password:
+                raise ClientError("新建账号必须设置初始密码。")
+            conn.execute(
+                "INSERT INTO accounts (id, username, password_hash, name, role) VALUES (?, ?, ?, ?, ?)",
+                (account_id, username, hash_password(password), name, role),
+            )
+        ensure_person_for_account(conn, {"id": account_id, "name": name, "role": role})
+        conn.commit()
+    return list_accounts()
+
+
+def delete_account(account_id):
+    if account_id == "account-admin":
+        raise ClientError("默认 admin 账号不能删除。")
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not row:
+            raise ClientError("账号不存在。")
+        conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        conn.commit()
+    return list_accounts()
 
 
 def read_state():
@@ -527,21 +710,98 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
+    def session_token(self):
+        cookie = self.headers.get("Cookie", "")
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "gantetu_session":
+                return value
+        return ""
+
+    def current_user(self):
+        return get_account_by_session(self.session_token())
+
+    def require_user(self):
+        user = self.current_user()
+        if not user:
+            raise AuthError("请先登录。")
+        return user
+
+    def require_admin(self):
+        user = self.require_user()
+        if user["role"] != "admin":
+            raise ForbiddenError("只有管理员可以管理账号。")
+        return user
+
+    def read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8")
+        return body, json.loads(body or "{}")
+
     def do_GET(self):
-        if urlparse(self.path).path == "/api/state":
-            self.send_json(200, read_state())
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/session":
+            user = self.current_user()
+            if not user:
+                self.send_json(401, {"error": "请先登录。"})
+                return
+            self.send_json(200, {"user": user})
+            return
+        if parsed.path == "/api/accounts":
+            try:
+                self.require_admin()
+                self.send_json(200, {"accounts": list_accounts()})
+            except ClientError as error:
+                self.send_json(error.status, {"error": str(error)})
+            return
+        if parsed.path == "/api/state":
+            try:
+                self.require_user()
+                self.send_json(200, read_state())
+            except ClientError as error:
+                self.send_json(error.status, {"error": str(error)})
             return
         super().do_GET()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/login":
+            try:
+                _, data = self.read_json_body()
+                token, user = login_account(data.get("username"), data.get("password"))
+                self.send_json(200, {"user": user}, cookie=f"gantetu_session={token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax")
+            except ClientError as error:
+                self.send_json(error.status, {"error": str(error)})
+            except Exception as error:
+                self.send_json(500, {"error": str(error)})
+            return
+        if parsed.path == "/api/logout":
+            token = self.session_token()
+            with connect() as conn:
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                conn.commit()
+            self.send_json(200, {"ok": True}, cookie="gantetu_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+            return
+        if parsed.path == "/api/accounts":
+            try:
+                self.require_admin()
+                _, data = self.read_json_body()
+                self.send_json(200, {"accounts": save_account(data)})
+            except ClientError as error:
+                self.send_json(error.status, {"error": str(error)})
+            except Exception as error:
+                self.send_json(500, {"error": str(error)})
+            return
+        self.send_error(404)
 
     def do_PUT(self):
         if urlparse(self.path).path != "/api/state":
             self.send_error(404)
             return
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length).decode("utf-8")
         try:
-            log_write_request("PUT", self.client_address[0], body)
-            state = json.loads(body or "{}")
+            user = self.require_user()
+            body, state = self.read_json_body()
+            log_write_request("PUT", self.client_address[0], user["username"], body)
             self.send_json(200, merge_state(state))
         except ClientError as error:
             self.send_json(error.status, {"error": str(error)})
@@ -552,23 +812,38 @@ class Handler(SimpleHTTPRequestHandler):
         if urlparse(self.path).path != "/api/state":
             self.send_error(404)
             return
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length).decode("utf-8")
         try:
-            log_write_request("PATCH", self.client_address[0], body)
-            patch = json.loads(body or "{}")
+            user = self.require_user()
+            body, patch = self.read_json_body()
+            log_write_request("PATCH", self.client_address[0], user["username"], body)
             self.send_json(200, apply_patch_state(patch))
         except ClientError as error:
             self.send_json(error.status, {"error": str(error)})
         except Exception as error:
             self.send_json(500, {"error": str(error)})
 
-    def send_json(self, status, payload):
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/accounts":
+            self.send_error(404)
+            return
+        try:
+            self.require_admin()
+            account_id = (parse_qs(parsed.query).get("id") or [""])[0]
+            self.send_json(200, {"accounts": delete_account(account_id)})
+        except ClientError as error:
+            self.send_json(error.status, {"error": str(error)})
+        except Exception as error:
+            self.send_json(500, {"error": str(error)})
+
+    def send_json(self, status, payload, cookie=None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(data)
 

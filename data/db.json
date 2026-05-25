@@ -61,6 +61,11 @@
       "role": "研发人员"
     },
     {
+      "id": "account-account-admin",
+      "name": "管理员",
+      "role": "管理员"
+    },
+    {
       "id": "person-1779331434225-9b3a274290c6f8",
       "name": "胡亚朋",
       "role": "研发人员"
@@ -140,16 +145,6 @@
       "kind": "",
       "people": [
         "刘鑫"
-      ]
-    },
-    {
-      "id": "req-1779674678470-0d2c9a69a5a408",
-      "title": "6666",
-      "link": "",
-      "status": "进行中",
-      "kind": "other",
-      "people": [
-        "涂杨广"
       ]
     },
     {
@@ -292,6 +287,16 @@
       "kind": "other",
       "people": [
         "章景锋"
+      ]
+    },
+    {
+      "id": "req-1779692931499-bb78794e78432",
+      "title": "今视频项目会议记录整理",
+      "link": "",
+      "status": "已完成",
+      "kind": "other",
+      "people": [
+        "涂杨广"
       ]
     },
     {
@@ -687,6 +692,16 @@
       "kind": "other",
       "people": [
         "邬勇鹏"
+      ]
+    },
+    {
+      "id": "req-1779692827634-eec55af698c348",
+      "title": "运营问题跟踪解答",
+      "link": "",
+      "status": "已完成",
+      "kind": "other",
+      "people": [
+        "涂杨广"
       ]
     },
     {
@@ -1312,6 +1327,15 @@
       "images": []
     },
     {
+      "id": "work-1779692827634-0379a0ab07f1b8",
+      "requirementId": "req-1779692827634-eec55af698c348",
+      "person": "涂杨广",
+      "start": "2026-05-22",
+      "end": "2026-05-22",
+      "content": "1.沿着长江遇见你-徐霞客数据被禁用\n2.文章搜索问题-es数据同步有问题，重新同步数据资源",
+      "images": []
+    },
+    {
       "id": "work-1779434085662-d81550b8332c5",
       "requirementId": "req-1779434085662-9d01b2049e5d5",
       "person": "黄伟",
@@ -1330,21 +1354,12 @@
       "images": []
     },
     {
-      "id": "work-1779674664300-6aeb736eb6a0e",
-      "requirementId": "req-1779331595998-e9f0eeec026ef8",
+      "id": "work-1779692931499-b5f923fbed00a8",
+      "requirementId": "req-1779692931499-bb78794e78432",
       "person": "涂杨广",
       "start": "2026-05-25",
       "end": "2026-05-25",
-      "content": "1111",
-      "images": []
-    },
-    {
-      "id": "work-1779674678470-be1147b8209f88",
-      "requirementId": "req-1779674678470-0d2c9a69a5a408",
-      "person": "涂杨广",
-      "start": "2026-05-25",
-      "end": "2026-05-25",
-      "content": "666",
+      "content": "处理19个今视频项目，打印整理，并找人签字",
       "images": []
     },
     {
