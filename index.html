@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>需求投入日历视图</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">本地排期看板</p>
+          <h1>需求投入日历视图</h1>
+        </div>
+        <div class="header-actions">
+          <label class="role-field">
+            <span>当前角色</span>
+            <select id="roleSelect">
+              <option value="admin">管理员</option>
+              <option value="leader">领导</option>
+              <option value="pm" selected>产品经理</option>
+              <option value="designer">设计师</option>
+              <option value="developer">研发人员</option>
+              <option value="tester">测试人员</option>
+            </select>
+          </label>
+          <label class="role-field" id="currentPersonField" hidden>
+            <span>当前人员</span>
+            <select id="currentPersonSelect"></select>
+          </label>
+          <button class="pending-action" id="pendingWorkButton" type="button" hidden>待处理工作（0）</button>
+          <button class="secondary-action" id="peopleManageButton" type="button" hidden>人员管理</button>
+          <button class="primary-action" id="addRequirementButton" type="button">新增需求</button>
+          <button class="primary-action alt-action" id="addVersionButton" type="button">新增版本</button>
+          <button class="secondary-action" id="addWorkButton" type="button">登记工作</button>
+          <button class="secondary-action" id="addOtherWorkButton" type="button" hidden>登记其他工作</button>
+          <button class="secondary-action" id="holidayButton" type="button">日历管理</button>
+        </div>
+        <div class="summary-strip" id="summaryStrip"></div>
+      </header>
+
+      <section class="toolbar" aria-label="筛选与视图控制">
+        <div class="view-switch" role="tablist" aria-label="视图切换">
+          <button class="view-button is-active" type="button" data-view="requirement">按需求</button>
+          <button class="view-button" type="button" data-view="person">按人员</button>
+          <button class="view-button" type="button" data-view="version">按版本</button>
+        </div>
+        <div class="version-mode" id="viewModeControl" aria-label="视图方式" hidden>
+          <span>视图方式</span>
+          <button class="mode-button is-active" type="button" data-view-mode="calendar" title="月历视图">▦</button>
+          <button class="mode-button" type="button" data-view-mode="timeline" title="横轴视图">▬</button>
+        </div>
+        <label class="field">
+          <span>同事</span>
+          <select id="personFilter"></select>
+        </label>
+        <label class="field">
+          <span>状态</span>
+          <select id="statusFilter"></select>
+        </label>
+        <label class="field search-field">
+          <span>搜索需求</span>
+          <input id="searchInput" type="search" placeholder="输入需求、版本、模块或人员" />
+        </label>
+      </section>
+
+      <section class="content-grid">
+        <aside class="side-panel">
+          <div class="panel-heading">
+            <h2>人员负载</h2>
+            <span id="dateRangeLabel"></span>
+          </div>
+          <div id="peopleLoad" class="people-load"></div>
+        </aside>
+
+        <section class="timeline-wrap" aria-label="需求投入表格">
+          <div class="timeline-scroll" id="timelineScroll">
+            <div class="timeline-grid" id="timelineGrid"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog class="config-dialog narrow-dialog" id="requirementDialog">
+      <form id="requirementForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">需求配置</p>
+            <h2 id="requirementDialogTitle">新增需求</h2>
+          </div>
+          <button class="icon-button" id="closeRequirementDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="requirementId" type="hidden" />
+        <label class="field">
+          <span>需求名称</span>
+          <input id="requirementTitleInput" required placeholder="输入需求名称" />
+        </label>
+        <label class="field">
+          <span>需求链接</span>
+          <input id="requirementLinkInput" type="url" placeholder="https://..." />
+        </label>
+        <label class="field">
+          <span>执行人</span>
+          <div class="people-picker" id="requirementPeoplePicker" role="group" aria-label="选择执行人"></div>
+          <small class="field-hint">可多选；执行人只能从人员管理里的人员列表中选择。</small>
+        </label>
+        <label class="field">
+          <span>状态</span>
+          <select id="requirementStatusInput">
+            <option>未开始</option>
+            <option>进行中</option>
+            <option>已完成</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deleteRequirementButton" type="button">删除</button>
+          <span class="form-error" id="requirementFormError"></span>
+          <button class="secondary-action" id="cancelRequirementButton" type="button">取消</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog" id="requirementManagerDialog">
+      <div class="manager-dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">需求管理</p>
+            <h2>需求列表</h2>
+          </div>
+          <button class="icon-button" id="closeRequirementManagerDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="section-head">
+          <h3 id="requirementManagerHint">当前筛选范围</h3>
+          <button class="primary-action compact" id="managerAddRequirementButton" type="button">新增需求</button>
+        </div>
+        <div class="manager-filters" aria-label="需求列表筛选">
+          <label class="field">
+            <span>搜索需求</span>
+            <input id="managerSearchInput" type="search" placeholder="输入需求、版本、人员" />
+          </label>
+          <label class="field">
+            <span>状态</span>
+            <select id="managerStatusFilter"></select>
+          </label>
+          <label class="field">
+            <span>执行人</span>
+            <select id="managerPersonFilter"></select>
+          </label>
+          <label class="field">
+            <span>所属版本</span>
+            <select id="managerVersionFilter"></select>
+          </label>
+          <button class="secondary-action compact" id="managerResetFiltersButton" type="button">重置</button>
+        </div>
+        <div class="requirement-manager-list" id="requirementManagerList"></div>
+      </div>
+    </dialog>
+
+    <dialog class="config-dialog" id="versionDialog">
+      <form id="versionForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">版本配置</p>
+            <h2 id="versionDialogTitle">新增版本</h2>
+          </div>
+          <button class="icon-button" id="closeVersionDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="versionId" type="hidden" />
+        <div class="form-grid entry-form-grid">
+          <label class="field">
+            <span>版本名称</span>
+            <input id="versionNameInput" required placeholder="例如：V6.1.5" />
+          </label>
+          <label class="field">
+            <span>开始日期</span>
+            <input id="versionStartInput" required type="date" />
+          </label>
+          <label class="field">
+            <span>结束日期</span>
+            <input id="versionEndInput" required type="date" />
+          </label>
+        </div>
+        <label class="field">
+          <span>从已创建需求列表中选择</span>
+          <div class="requirement-picker" id="versionRequirementPicker" role="group" aria-label="选择版本包含需求"></div>
+          <small class="field-hint">可多选；这里只显示未归属版本的需求，编辑当前版本时会保留本版本已包含的需求。</small>
+        </label>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deleteVersionButton" type="button">删除</button>
+          <span class="form-error" id="versionFormError"></span>
+          <button class="secondary-action" id="cancelVersionButton" type="button">取消</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog" id="workDialog">
+      <form id="workForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">工作记录</p>
+            <h2 id="workDialogTitle">登记工作</h2>
+          </div>
+          <button class="icon-button" id="closeWorkDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="workId" type="hidden" />
+        <div class="form-grid work-form-grid">
+          <label class="field work-requirement-field">
+            <span>需求</span>
+            <select id="workRequirementInput" required></select>
+          </label>
+          <label class="field work-single-field">
+            <span>负责人</span>
+            <select id="workPersonInput" required></select>
+          </label>
+          <label class="field work-single-field">
+            <span>开始日期</span>
+            <input id="workStartInput" required type="date" />
+          </label>
+          <label class="field work-single-field">
+            <span>结束日期</span>
+            <input id="workEndInput" required type="date" />
+          </label>
+        </div>
+        <section class="assignment-section" id="workAssignmentSection" hidden>
+          <div class="section-head">
+            <h3>人员时间安排</h3>
+            <button class="secondary-action compact" id="addAssignmentButton" type="button">添加人员</button>
+          </div>
+          <div class="assignment-list" id="workAssignmentList"></div>
+        </section>
+        <label class="field" id="workContentField">
+          <span>工作内容</span>
+          <textarea id="workContentInput" rows="8" placeholder="写下这个人在这个需求上负责了什么、做了什么具体内容"></textarea>
+          <div class="image-paste-box" id="workImagePasteBox" tabindex="0">
+            <strong>可直接粘贴图片</strong>
+            <span>截图后在这里按 Ctrl/⌘ + V，图片会随工作记录一起保存。</span>
+          </div>
+          <div class="work-image-list" id="workImageList"></div>
+        </label>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deleteWorkButton" type="button">删除</button>
+          <span class="form-error" id="workFormError"></span>
+          <button class="secondary-action" id="cancelWorkButton" type="button">取消</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog" id="pendingWorkDialog">
+      <div class="manager-dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">待处理工作</p>
+            <h2 id="pendingWorkTitle">待处理工作</h2>
+          </div>
+          <button class="icon-button" id="closePendingWorkDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="pending-work-list" id="pendingWorkList"></div>
+      </div>
+    </dialog>
+
+    <dialog class="config-dialog" id="otherWorkDialog">
+      <form id="otherWorkForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">其他工作</p>
+            <h2 id="otherWorkDialogTitle">登记其他工作</h2>
+          </div>
+          <button class="icon-button" id="closeOtherWorkDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="otherWorkId" type="hidden" />
+        <div class="form-grid work-form-grid">
+          <label class="field work-requirement-field">
+            <span>工作标题</span>
+            <input id="otherWorkTitleInput" required placeholder="输入工作标题" />
+          </label>
+          <label class="field">
+            <span>开始日期</span>
+            <input id="otherWorkStartInput" required type="date" />
+          </label>
+          <label class="field">
+            <span>结束日期</span>
+            <input id="otherWorkEndInput" required type="date" />
+          </label>
+          <label class="field">
+            <span>状态</span>
+            <select id="otherWorkStatusInput">
+              <option>未开始</option>
+              <option>进行中</option>
+              <option>已完成</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">
+          <span>工作内容</span>
+          <textarea id="otherWorkContentInput" rows="8" placeholder="写下这项工作做了什么具体内容"></textarea>
+          <div class="image-paste-box" id="otherWorkImagePasteBox" tabindex="0">
+            <strong>可直接粘贴图片</strong>
+            <span>截图后在这里按 Ctrl/⌘ + V，图片会随工作记录一起保存。</span>
+          </div>
+          <div class="work-image-list" id="otherWorkImageList"></div>
+        </label>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deleteOtherWorkButton" type="button">删除</button>
+          <span class="form-error" id="otherWorkFormError"></span>
+          <button class="secondary-action" id="cancelOtherWorkButton" type="button">取消</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog" id="holidayDialog">
+      <form id="holidayForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">日历配置</p>
+            <h2>日历管理</h2>
+          </div>
+          <button class="icon-button" id="closeHolidayDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <section class="calendar-admin" aria-label="工作日与休息日配置">
+          <div class="calendar-admin-toolbar">
+            <button class="secondary-action compact" id="calendarPrevMonthButton" type="button">上月</button>
+            <select class="calendar-month-select" id="holidayMonthInput" aria-label="选择月份"></select>
+            <button class="secondary-action compact" id="calendarNextMonthButton" type="button">下月</button>
+          </div>
+          <div class="calendar-admin-legend">
+            <span><i class="legend-workday"></i>工作日</span>
+            <span><i class="legend-restday"></i>休息日</span>
+            <span><i class="legend-adjusted"></i>手动调整</span>
+          </div>
+          <div class="calendar-admin-grid" id="holidayCalendarGrid"></div>
+          <small class="field-hint">点击日期可在工作日和休息日之间切换；登记工作跨日期时只会计入工作日。</small>
+        </section>
+        <div class="dialog-actions">
+          <span class="form-error" id="holidayFormError"></span>
+          <button class="secondary-action" id="cancelHolidayButton" type="button">取消</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog narrow-dialog" id="workDetailDialog">
+      <div class="manager-dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">工作详情</p>
+            <h2 id="workDetailTitle">工作详情</h2>
+          </div>
+          <button class="icon-button" id="closeWorkDetailDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="work-detail-body" id="workDetailBody"></div>
+      </div>
+    </dialog>
+
+    <dialog class="config-dialog" id="peopleDialog">
+      <form id="peopleForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">人员管理</p>
+            <h2>人员列表</h2>
+          </div>
+          <button class="icon-button" id="closePeopleDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="people-manager">
+          <section class="people-list-panel" aria-label="所有人员">
+            <div class="section-head">
+              <h3>现有人员</h3>
+              <button class="secondary-action compact" id="newPersonButton" type="button">新建人员</button>
+            </div>
+            <div class="people-list" id="peopleList"></div>
+          </section>
+          <section class="person-edit-panel" aria-label="编辑人员">
+            <input id="personId" type="hidden" />
+            <label class="field">
+              <span>姓名</span>
+              <input id="personNameInput" required placeholder="输入姓名" />
+            </label>
+            <label class="field">
+              <span>角色</span>
+              <select id="personRoleInput" required>
+                <option>领导</option>
+                <option>产品经理</option>
+                <option>设计师</option>
+                <option>研发人员</option>
+                <option>测试人员</option>
+                <option>管理员</option>
+              </select>
+            </label>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button class="danger-action" id="deletePersonButton" type="button">删除</button>
+          <span class="form-error" id="personFormError"></span>
+          <button class="secondary-action" id="cancelPeopleButton" type="button">关闭</button>
+          <button class="primary-action" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+    <script src="./assets/app.js"></script>
+  </body>
+</html>
