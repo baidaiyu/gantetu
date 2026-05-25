@@ -517,6 +517,16 @@
       ]
     },
     {
+      "id": "req-1779673060636-ac2cf5e985c5a",
+      "title": "测试用例编写",
+      "link": "",
+      "status": "进行中",
+      "kind": "other",
+      "people": [
+        "涂杨广"
+      ]
+    },
+    {
       "id": "req-1779331910807-d07d61d90eb448",
       "title": "生活页改版",
       "link": "https://aapdd1bqc8z.feishu.cn/wiki/VHbewtyBzicvrEkRvshcSKBTngc",
@@ -1270,6 +1280,15 @@
       "start": "2026-05-21",
       "end": "2026-05-21",
       "content": "小程序交互增加微信分享、朋友圈分享",
+      "images": []
+    },
+    {
+      "id": "work-1779673060636-6af2184f23056",
+      "requirementId": "req-1779673060636-ac2cf5e985c5a",
+      "person": "涂杨广",
+      "start": "2026-05-22",
+      "end": "2026-05-22",
+      "content": "1.【20260509】今视频改版-全部社区增加分类筛选-测试用例编写\n2.【20260509】今视频改版-生活页改版 -测试用例编写",
       "images": []
     },
     {

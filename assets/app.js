@@ -507,7 +507,7 @@ function applyState(state) {
   workItems = nextState.workItems.map(normalizeWork);
   holidays = new Set(nextState.holidays || []);
   workdays = new Set(nextState.workdays || []);
-  ensurePeopleFromData();
+  ensurePeopleFromExistingData();
 }
 
 function showToast(type, title, message = "") {

@@ -371,7 +371,10 @@ def write_state(state):
 def upsert_people(conn, people):
     for person in people or []:
         conn.execute(
-            "INSERT OR REPLACE INTO people (id, name, role) VALUES (?, ?, ?)",
+            """
+            INSERT INTO people (id, name, role) VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role
+            """,
             (person.get("id"), person.get("name", ""), person.get("role", "研发人员")),
         )
 
@@ -380,7 +383,14 @@ def upsert_requirements(conn, requirements):
     for req in requirements or []:
         req_id = req.get("id")
         conn.execute(
-            "INSERT OR REPLACE INTO requirements (id, title, link, status, kind) VALUES (?, ?, ?, ?, ?)",
+            """
+            INSERT INTO requirements (id, title, link, status, kind) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              link = excluded.link,
+              status = excluded.status,
+              kind = excluded.kind
+            """,
             (
                 req_id,
                 req.get("title", "未命名需求"),
@@ -401,7 +411,13 @@ def upsert_versions(conn, versions):
     for version in versions or []:
         version_id = version.get("id")
         conn.execute(
-            "INSERT OR REPLACE INTO versions (id, name, start, end) VALUES (?, ?, ?, ?)",
+            """
+            INSERT INTO versions (id, name, start, end) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              start = excluded.start,
+              end = excluded.end
+            """,
             (version_id, version.get("name", "未命名版本"), version.get("start"), version.get("end")),
         )
         conn.execute("DELETE FROM version_requirements WHERE version_id = ?", (version_id,))
@@ -415,7 +431,16 @@ def upsert_versions(conn, versions):
 def upsert_work_items(conn, work_items):
     for item in work_items or []:
         conn.execute(
-            "INSERT OR REPLACE INTO work_items (id, requirement_id, person, start, end, content, images) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO work_items (id, requirement_id, person, start, end, content, images) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              requirement_id = excluded.requirement_id,
+              person = excluded.person,
+              start = excluded.start,
+              end = excluded.end,
+              content = excluded.content,
+              images = excluded.images
+            """,
             (
                 item.get("id"),
                 item.get("requirementId"),
