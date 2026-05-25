@@ -523,9 +523,20 @@ function byId(items = []) {
   return new Map(items.map((item) => [item.id, item]));
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function changedItems(previousItems = [], currentItems = []) {
   const previous = byId(previousItems);
-  return currentItems.filter((item) => JSON.stringify(previous.get(item.id)) !== JSON.stringify(item));
+  return currentItems.filter((item) => stableStringify(previous.get(item.id)) !== stableStringify(item));
 }
 
 function baseItems(previousItems = [], changed = []) {
