@@ -31,6 +31,7 @@ ROLE_LABELS = {
     "developer": "研发人员",
     "tester": "测试人员",
 }
+ACCOUNT_ROLES_BY_PERSON_ROLE = {label: key for key, label in ROLE_LABELS.items()}
 
 EMPTY_STATE = {
     "people": [],
@@ -81,20 +82,29 @@ def role_label(role):
     return ROLE_LABELS.get(role, "研发人员")
 
 
+def role_from_person_role(person_role, fallback="developer"):
+    return ACCOUNT_ROLES_BY_PERSON_ROLE.get(person_role, fallback if fallback in ROLE_LABELS else "developer")
+
+
 def account_payload(row):
+    keys = set(row.keys())
+    person_name = row["person_name"] if "person_name" in keys else None
+    person_role = row["person_role"] if "person_role" in keys else None
+    role = role_from_person_role(person_role, row["role"])
     return {
         "id": row["id"],
         "username": row["username"],
-        "name": row["name"],
-        "role": row["role"],
-        "roleLabel": role_label(row["role"]),
+        "personId": row["person_id"] if "person_id" in keys else "",
+        "name": person_name or row["name"],
+        "role": role,
+        "roleLabel": role_label(role),
     }
 
 
 def ensure_person_for_account(conn, account):
     name = (account.get("name") or "").strip()
     if not name:
-        return
+        return ""
     existing = conn.execute("SELECT id FROM people WHERE name = ? LIMIT 1", (name,)).fetchone()
     person_id = existing["id"] if existing else f"account-{account['id']}"
     conn.execute(
@@ -104,6 +114,7 @@ def ensure_person_for_account(conn, account):
         """,
         (person_id, name, role_label(account.get("role"))),
     )
+    return person_id
 
 
 def snapshot_data(reason):
@@ -292,7 +303,8 @@ def init_db():
               username TEXT NOT NULL UNIQUE,
               password_hash TEXT NOT NULL,
               name TEXT NOT NULL,
-              role TEXT NOT NULL
+              role TEXT NOT NULL,
+              person_id TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -306,6 +318,9 @@ def init_db():
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(work_items)")]
         if "images" not in columns:
             conn.execute("ALTER TABLE work_items ADD COLUMN images TEXT NOT NULL DEFAULT '[]'")
+        account_columns = [row["name"] for row in conn.execute("PRAGMA table_info(accounts)")]
+        if "person_id" not in account_columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN person_id TEXT NOT NULL DEFAULT ''")
         if not conn.execute("SELECT 1 FROM accounts WHERE username = ?", ("admin",)).fetchone():
             admin = {
                 "id": "account-admin",
@@ -313,11 +328,15 @@ def init_db():
                 "name": "管理员",
                 "role": "admin",
             }
+            person_id = ensure_person_for_account(conn, admin)
             conn.execute(
-                "INSERT INTO accounts (id, username, password_hash, name, role) VALUES (?, ?, ?, ?, ?)",
-                (admin["id"], admin["username"], hash_password("wl8430481"), admin["name"], admin["role"]),
+                "INSERT INTO accounts (id, username, password_hash, name, role, person_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (admin["id"], admin["username"], hash_password("wl8430481"), admin["name"], admin["role"], person_id),
             )
-            ensure_person_for_account(conn, admin)
+        for account in conn.execute("SELECT id, name, role, person_id FROM accounts WHERE person_id = '' OR person_id IS NULL").fetchall():
+            person_id = ensure_person_for_account(conn, dict(account))
+            if person_id:
+                conn.execute("UPDATE accounts SET person_id = ? WHERE id = ?", (person_id, account["id"]))
     migrate_json_if_needed()
 
 
@@ -351,7 +370,15 @@ def list_accounts():
     with connect() as conn:
         return [
             account_payload(row)
-            for row in conn.execute("SELECT id, username, name, role FROM accounts ORDER BY username")
+            for row in conn.execute(
+                """
+                SELECT accounts.id, accounts.username, accounts.name, accounts.role, accounts.person_id,
+                       people.name AS person_name, people.role AS person_role
+                FROM accounts
+                LEFT JOIN people ON people.id = accounts.person_id
+                ORDER BY accounts.username
+                """
+            )
         ]
 
 
@@ -362,9 +389,11 @@ def get_account_by_session(token):
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT accounts.id, accounts.username, accounts.name, accounts.role
+            SELECT accounts.id, accounts.username, accounts.name, accounts.role, accounts.person_id,
+                   people.name AS person_name, people.role AS person_role
             FROM sessions
             JOIN accounts ON accounts.id = sessions.account_id
+            LEFT JOIN people ON people.id = accounts.person_id
             WHERE sessions.token = ? AND sessions.expires_at > ?
             """,
             (token, now),
@@ -385,7 +414,13 @@ def create_session(account_id):
 def login_account(username, password):
     with connect() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, name, role FROM accounts WHERE username = ?",
+            """
+            SELECT accounts.id, accounts.username, accounts.password_hash, accounts.name, accounts.role, accounts.person_id,
+                   people.name AS person_name, people.role AS person_role
+            FROM accounts
+            LEFT JOIN people ON people.id = accounts.person_id
+            WHERE accounts.username = ?
+            """,
             ((username or "").strip(),),
         ).fetchone()
     if not row or not verify_password(password or "", row["password_hash"]):
@@ -396,31 +431,37 @@ def login_account(username, password):
 
 def save_account(data):
     username = (data.get("username") or "").strip()
-    name = (data.get("name") or "").strip()
-    role = data.get("role") if data.get("role") in ROLE_LABELS else "developer"
+    person_id = (data.get("personId") or "").strip()
     password = data.get("password") or ""
     account_id = data.get("id") or f"account-{secrets.token_hex(8)}"
-    if not username or not name:
-        raise ClientError("请填写账号和姓名。")
+    if not username or not person_id:
+        raise ClientError("请选择登录账号要绑定的人员。")
     with connect() as conn:
+        person = conn.execute("SELECT id, name, role FROM people WHERE id = ?", (person_id,)).fetchone()
+        if not person:
+            raise ClientError("绑定的人员不存在，请先在人员管理中创建。")
+        name = person["name"]
+        role = role_from_person_role(person["role"])
         existing = conn.execute("SELECT id FROM accounts WHERE username = ? AND id <> ?", (username, account_id)).fetchone()
         if existing:
             raise ClientError("这个账号名已经存在。")
+        existing_person = conn.execute("SELECT username FROM accounts WHERE person_id = ? AND id <> ?", (person_id, account_id)).fetchone()
+        if existing_person:
+            raise ClientError(f"人员「{name}」已经绑定了账号 {existing_person['username']}。")
         current = conn.execute("SELECT password_hash FROM accounts WHERE id = ?", (account_id,)).fetchone()
         if current:
             password_hash = hash_password(password) if password else current["password_hash"]
             conn.execute(
-                "UPDATE accounts SET username = ?, password_hash = ?, name = ?, role = ? WHERE id = ?",
-                (username, password_hash, name, role, account_id),
+                "UPDATE accounts SET username = ?, password_hash = ?, name = ?, role = ?, person_id = ? WHERE id = ?",
+                (username, password_hash, name, role, person_id, account_id),
             )
         else:
             if not password:
                 raise ClientError("新建账号必须设置初始密码。")
             conn.execute(
-                "INSERT INTO accounts (id, username, password_hash, name, role) VALUES (?, ?, ?, ?, ?)",
-                (account_id, username, hash_password(password), name, role),
+                "INSERT INTO accounts (id, username, password_hash, name, role, person_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (account_id, username, hash_password(password), name, role, person_id),
             )
-        ensure_person_for_account(conn, {"id": account_id, "name": name, "role": role})
         conn.commit()
     return list_accounts()
 

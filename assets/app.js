@@ -43,6 +43,7 @@ const accountRoles = {
   developer: "研发人员",
   tester: "测试人员",
 };
+const accountRoleByPersonRole = Object.fromEntries(Object.entries(accountRoles).map(([key, value]) => [value, key]));
 const PM_ASSIGNMENT_CONTENT = "产品经理分配";
 let currentView = "requirement";
 let requirementViewMode = "timeline";
@@ -210,7 +211,7 @@ const els = {
   accountList: document.querySelector("#accountList"),
   accountId: document.querySelector("#accountId"),
   accountUsernameInput: document.querySelector("#accountUsernameInput"),
-  accountNameInput: document.querySelector("#accountNameInput"),
+  accountPersonInput: document.querySelector("#accountPersonInput"),
   accountRoleInput: document.querySelector("#accountRoleInput"),
   accountPasswordInput: document.querySelector("#accountPasswordInput"),
   newAccountButton: document.querySelector("#newAccountButton"),
@@ -2058,12 +2059,26 @@ function renderAccountManager(selectedId = els.accountId.value) {
     : `<div class="empty-state people-empty">还没有账号。</div>`;
 }
 
+function renderAccountPersonOptions(selectedPersonId = "") {
+  const sortedPeople = [...people].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  els.accountPersonInput.innerHTML = [
+    `<option value="">选择已有人员</option>`,
+    ...sortedPeople.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)} · ${escapeHtml(person.role)}</option>`),
+  ].join("");
+  els.accountPersonInput.value = selectedPersonId && sortedPeople.some((person) => person.id === selectedPersonId) ? selectedPersonId : "";
+  updateAccountRolePreview();
+}
+
+function updateAccountRolePreview() {
+  const person = people.find((item) => item.id === els.accountPersonInput.value);
+  els.accountRoleInput.value = person ? person.role : "请选择人员";
+}
+
 function clearAccountForm() {
   els.accountFormError.textContent = "";
   els.accountId.value = "";
   els.accountUsernameInput.value = "";
-  els.accountNameInput.value = "";
-  els.accountRoleInput.value = "developer";
+  renderAccountPersonOptions("");
   els.accountPasswordInput.value = "";
   els.deleteAccountButton.hidden = true;
   renderAccountManager("");
@@ -2074,8 +2089,7 @@ function editAccount(account) {
   els.accountFormError.textContent = "";
   els.accountId.value = account.id;
   els.accountUsernameInput.value = account.username;
-  els.accountNameInput.value = account.name;
-  els.accountRoleInput.value = account.role;
+  renderAccountPersonOptions(account.personId);
   els.accountPasswordInput.value = "";
   els.deleteAccountButton.hidden = account.username === "admin";
   renderAccountManager(account.id);
@@ -2096,8 +2110,7 @@ async function saveAccount() {
   const data = {
     id: els.accountId.value,
     username: els.accountUsernameInput.value.trim(),
-    name: els.accountNameInput.value.trim(),
-    role: els.accountRoleInput.value,
+    personId: els.accountPersonInput.value,
     password: els.accountPasswordInput.value,
   };
   try {
@@ -2367,6 +2380,7 @@ async function init() {
   els.closeAccountDialog.addEventListener("click", () => els.accountDialog.close());
   els.cancelAccountButton.addEventListener("click", () => els.accountDialog.close());
   els.newAccountButton.addEventListener("click", clearAccountForm);
+  els.accountPersonInput.addEventListener("input", updateAccountRolePreview);
   els.accountList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action='edit-account']");
     if (!button) return;

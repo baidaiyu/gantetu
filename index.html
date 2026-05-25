@@ -451,19 +451,13 @@
               <input id="accountUsernameInput" required placeholder="例如：zhangsan" autocomplete="off" />
             </label>
             <label class="field">
-              <span>姓名</span>
-              <input id="accountNameInput" required placeholder="例如：张三" autocomplete="off" />
+              <span>绑定人员</span>
+              <select id="accountPersonInput" required></select>
+              <small class="field-hint">账号姓名和权限角色会跟随人员管理中的人员信息。</small>
             </label>
             <label class="field">
               <span>平台角色</span>
-              <select id="accountRoleInput" required>
-                <option value="leader">领导</option>
-                <option value="pm">产品经理</option>
-                <option value="designer">设计师</option>
-                <option value="developer">研发人员</option>
-                <option value="tester">测试人员</option>
-                <option value="admin">管理员</option>
-              </select>
+              <input id="accountRoleInput" readonly value="请选择人员" />
             </label>
             <label class="field">
               <span>密码</span>
@@ -481,6 +475,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260525-accounts"></script>
+    <script src="./assets/app.js?v=20260525-account-link"></script>
   </body>
 </html>
