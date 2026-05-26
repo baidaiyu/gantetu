@@ -41,6 +41,15 @@ body {
   color: var(--ink);
 }
 
+body.auth-view {
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+body.auth-view .app-shell {
+  display: none;
+}
+
 button,
 input,
 select,
@@ -55,6 +64,104 @@ button {
 .app-shell {
   min-height: 100vh;
   padding: 28px;
+}
+
+#loginDialog {
+  background:
+    linear-gradient(135deg, rgba(246, 247, 242, 0.95), rgba(255, 255, 255, 0.98)),
+    var(--bg);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--ink);
+  height: 100vh;
+  max-height: none;
+  max-width: none;
+  padding: 0;
+  width: 100vw;
+}
+
+#loginDialog::backdrop {
+  background: var(--bg);
+}
+
+.login-page {
+  align-items: center;
+  display: grid;
+  gap: 52px;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 520px);
+  min-height: 100vh;
+  padding: clamp(28px, 6vw, 88px);
+}
+
+.login-intro {
+  max-width: 640px;
+}
+
+.login-intro h2 {
+  font-size: clamp(42px, 7vw, 84px);
+  letter-spacing: 0;
+  line-height: 0.98;
+  margin: 0 0 24px;
+}
+
+.login-intro p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.7;
+  margin: 0;
+  max-width: 560px;
+}
+
+.login-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 32px;
+}
+
+.login-highlights span {
+  background: var(--green-soft);
+  border: 1px solid #bfdfd2;
+  border-radius: 999px;
+  color: var(--green);
+  font-size: 14px;
+  font-weight: 850;
+  padding: 9px 14px;
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 22px;
+  padding: clamp(28px, 4vw, 42px);
+  width: 100%;
+}
+
+.login-card h2 {
+  font-size: 28px;
+  margin: 0;
+}
+
+.login-card .field input {
+  min-height: 52px;
+}
+
+.login-actions {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-top: 22px;
+}
+
+.login-actions .primary-action {
+  min-width: 108px;
 }
 
 .topbar {
@@ -1361,6 +1468,13 @@ button.calendar-admin-day:hover {
   padding: 22px;
 }
 
+#loginDialog .login-page {
+  gap: 52px;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 520px);
+  min-height: 100vh;
+  padding: clamp(28px, 6vw, 88px);
+}
+
 .manager-filters {
   align-items: end;
   background: #f7faf5;
@@ -1839,6 +1953,20 @@ button.calendar-admin-day:hover {
     min-width: 0;
   }
 
+  #loginDialog .login-page {
+    gap: 28px;
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .login-intro {
+    max-width: 760px;
+  }
+
+  .login-intro h2 {
+    font-size: clamp(34px, 10vw, 56px);
+  }
+
   .toolbar {
     grid-template-columns: 1fr 1fr;
   }
@@ -1956,6 +2084,25 @@ button.calendar-admin-day:hover {
 @media (max-width: 700px) {
   .app-shell {
     padding: 16px;
+  }
+
+  #loginDialog .login-page {
+    padding: 22px;
+  }
+
+  .login-intro p:not(.eyebrow),
+  .login-highlights {
+    display: none;
+  }
+
+  .login-card {
+    padding: 22px;
+  }
+
+  .login-actions {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .summary-strip,

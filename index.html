@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260525-accounts" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260526-login-page" />
   </head>
-  <body>
+  <body class="auth-view">
     <main class="app-shell">
       <header class="topbar">
         <div>
@@ -86,24 +86,34 @@
     </main>
 
     <dialog class="config-dialog narrow-dialog" id="loginDialog">
-      <form id="loginForm" method="dialog">
-        <div class="dialog-head">
+      <form class="login-page" id="loginForm" method="dialog">
+        <div class="login-intro">
+          <p class="eyebrow">内部排期平台</p>
+          <h2>需求投入日历视图</h2>
+          <p>把需求、版本、人员和工作时间放在同一张日历里，方便团队同步当前投入与排期状态。</p>
+          <div class="login-highlights" aria-label="平台能力">
+            <span>需求管理</span>
+            <span>版本排期</span>
+            <span>人员视图</span>
+          </div>
+        </div>
+        <div class="login-card">
           <div>
             <p class="eyebrow">账号登录</p>
             <h2>登录排期平台</h2>
           </div>
-        </div>
-        <label class="field">
-          <span>账号</span>
-          <input id="loginUsernameInput" required autocomplete="username" placeholder="admin" />
-        </label>
-        <label class="field">
-          <span>密码</span>
-          <input id="loginPasswordInput" required type="password" autocomplete="current-password" placeholder="初次登录，密码为123456" />
-        </label>
-        <div class="dialog-actions">
-          <span class="form-error" id="loginFormError"></span>
-          <button class="primary-action" type="submit">登录</button>
+          <label class="field">
+            <span>账号</span>
+            <input id="loginUsernameInput" required autocomplete="username" placeholder="admin" />
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input id="loginPasswordInput" required type="password" autocomplete="current-password" placeholder="初次登录，密码为123456" />
+          </label>
+          <div class="login-actions">
+            <span class="form-error" id="loginFormError"></span>
+            <button class="primary-action" type="submit">登录</button>
+          </div>
         </div>
       </form>
     </dialog>
@@ -499,6 +509,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260526-password-reset"></script>
+    <script src="./assets/app.js?v=20260526-login-page"></script>
   </body>
 </html>

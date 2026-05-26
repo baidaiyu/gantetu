@@ -2213,6 +2213,7 @@ function render() {
 }
 
 function openResetPasswordDialog() {
+  document.body.classList.add("auth-view");
   els.resetPasswordFormError.textContent = "";
   els.currentPasswordInput.value = "";
   els.newPasswordInput.value = "";
@@ -2257,6 +2258,7 @@ async function init() {
   }
   currentUser = await loadSession();
   if (!currentUser) {
+    document.body.classList.add("auth-view");
     els.loginUsernameInput.value = "admin";
     els.loginDialog.showModal();
     return;
@@ -2265,6 +2267,7 @@ async function init() {
     openResetPasswordDialog();
     return;
   }
+  document.body.classList.remove("auth-view");
   currentRole = currentUser.role;
   currentPerson = currentUser.name || "";
   els.roleSelect.value = currentRole;
