@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260526-login-page" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260526-work-mine-filter" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -273,6 +273,10 @@
           <label class="field work-requirement-field">
             <span>需求</span>
             <select id="workRequirementInput" required></select>
+            <label class="inline-check" id="workMineOnlyField">
+              <input id="workMineOnlyInput" type="checkbox" />
+              <span>仅显示我创建的需求</span>
+            </label>
           </label>
           <label class="field work-single-field">
             <span>负责人</span>
@@ -509,6 +513,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260526-login-page"></script>
+    <script src="./assets/app.js?v=20260526-work-mine-filter"></script>
   </body>
 </html>

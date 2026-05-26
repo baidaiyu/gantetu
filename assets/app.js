@@ -154,6 +154,8 @@ const els = {
   workDialogTitle: document.querySelector("#workDialogTitle"),
   workId: document.querySelector("#workId"),
   workRequirementInput: document.querySelector("#workRequirementInput"),
+  workMineOnlyField: document.querySelector("#workMineOnlyField"),
+  workMineOnlyInput: document.querySelector("#workMineOnlyInput"),
   workPersonInput: document.querySelector("#workPersonInput"),
   workStartInput: document.querySelector("#workStartInput"),
   workEndInput: document.querySelector("#workEndInput"),
@@ -378,6 +380,8 @@ function normalizeRequirement(input) {
     people: Array.isArray(input.people) ? input.people : splitList(input.people || ""),
     status: requirementStatusConfig[input.status] ? input.status : "未开始",
     kind: input.kind === "other" ? "other" : "",
+    createdBy: input.createdBy || input.created_by || "",
+    createdByName: input.createdByName || input.created_by_name || "",
   };
 }
 
@@ -1443,6 +1447,8 @@ function saveRequirement() {
     link: els.requirementLinkInput.value.trim(),
     people: selectedPeople,
     status: els.requirementStatusInput.value,
+    createdBy: requirementById(els.requirementId.value)?.createdBy || currentUser?.username || "",
+    createdByName: requirementById(els.requirementId.value)?.createdByName || currentUser?.name || currentPerson || "",
   });
   const index = requirements.findIndex((item) => item.id === req.id);
   if (index >= 0) requirements.splice(index, 1, req);
@@ -1634,6 +1640,23 @@ function assignmentRows() {
   }));
 }
 
+function requirementCreatedByCurrentUser(req) {
+  return Boolean(req && currentUser && (req.createdBy === currentUser.username || req.createdByName === currentUser.name));
+}
+
+function workDialogRequirements() {
+  if (currentRole === "pm" && els.workMineOnlyInput.checked) return requirements.filter(requirementCreatedByCurrentUser);
+  return requirements;
+}
+
+function renderWorkRequirementOptions(selectedId = "") {
+  const options = workDialogRequirements();
+  els.workRequirementInput.innerHTML = options.length
+    ? options.map((req) => `<option value="${req.id}">${escapeHtml(req.title)}</option>`).join("")
+    : `<option value="">暂无可选需求</option>`;
+  els.workRequirementInput.value = selectedId && options.some((req) => req.id === selectedId) ? selectedId : options[0]?.id || "";
+}
+
 function openWorkDialog(work, preset = {}) {
   const source = work || preset;
   const isEdit = Boolean(work?.id);
@@ -1644,11 +1667,12 @@ function openWorkDialog(work, preset = {}) {
   els.workRequirementInput.disabled = lockAssignment;
   els.workPersonInput.disabled = lockAssignment;
   els.workAssignmentList.innerHTML = "";
-  els.workRequirementInput.innerHTML = requirements.map((req) => `<option value="${req.id}">${escapeHtml(req.title)}</option>`).join("");
+  els.workMineOnlyField.hidden = !bulkAssign;
+  els.workMineOnlyInput.checked = false;
+  renderWorkRequirementOptions(source?.requirementId);
   populatePeopleSelect(els.workPersonInput, source?.person ? [source.person] : [], "选择负责人");
   els.workId.value = work?.id || "";
   els.workDialogTitle.textContent = bulkAssign ? "分配需求工作" : isEdit ? "编辑工作" : "登记工作";
-  els.workRequirementInput.value = source?.requirementId || requirements[0]?.id || "";
   els.workPersonInput.value = source?.person || "";
   els.workStartInput.value = source?.start || todayKey();
   els.workEndInput.value = source?.end || todayKey();
@@ -1776,6 +1800,8 @@ function saveOtherWork() {
       req.people = [currentPerson];
       req.status = els.otherWorkStatusInput.value;
       req.kind = "other";
+      req.createdBy = req.createdBy || currentUser?.username || "";
+      req.createdByName = req.createdByName || currentUser?.name || currentPerson || "";
     }
     existingWork.start = els.otherWorkStartInput.value;
     existingWork.end = els.otherWorkEndInput.value;
@@ -1791,6 +1817,8 @@ function saveOtherWork() {
     people: [currentPerson],
     status: els.otherWorkStatusInput.value,
     kind: "other",
+    createdBy: currentUser?.username || "",
+    createdByName: currentUser?.name || currentPerson || "",
   });
   requirements.push(req);
   workItems.push(
@@ -2392,6 +2420,7 @@ async function init() {
   els.closeWorkDialog.addEventListener("click", () => els.workDialog.close());
   els.cancelWorkButton.addEventListener("click", () => els.workDialog.close());
   els.addAssignmentButton.addEventListener("click", () => addAssignmentRow());
+  els.workMineOnlyInput.addEventListener("input", () => renderWorkRequirementOptions(els.workRequirementInput.value));
   els.workAssignmentList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action='remove-assignment']");
     if (!button) return;

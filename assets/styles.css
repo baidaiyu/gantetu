@@ -1568,6 +1568,22 @@ button.calendar-admin-day:hover {
   line-height: 1.5;
 }
 
+.inline-check {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 8px;
+}
+
+.inline-check input {
+  accent-color: var(--green);
+  height: 16px;
+  width: 16px;
+}
+
 .people-picker {
   background: var(--surface-strong);
   border: 1px solid var(--line);

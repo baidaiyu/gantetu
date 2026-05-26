@@ -140,7 +140,7 @@ def current_person(conn, person_id):
 
 
 def current_requirement(conn, req_id):
-    row = conn.execute("SELECT id, title, link, status, kind FROM requirements WHERE id = ?", (req_id,)).fetchone()
+    row = conn.execute("SELECT id, title, link, status, kind, created_by AS createdBy, created_by_name AS createdByName FROM requirements WHERE id = ?", (req_id,)).fetchone()
     if not row:
         return None
     req = dict(row)
@@ -243,7 +243,9 @@ def init_db():
               title TEXT NOT NULL,
               link TEXT NOT NULL DEFAULT '',
               status TEXT NOT NULL,
-              kind TEXT NOT NULL DEFAULT ''
+              kind TEXT NOT NULL DEFAULT '',
+              created_by TEXT NOT NULL DEFAULT '',
+              created_by_name TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS requirement_people (
@@ -310,6 +312,11 @@ def init_db():
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(work_items)")]
         if "images" not in columns:
             conn.execute("ALTER TABLE work_items ADD COLUMN images TEXT NOT NULL DEFAULT '[]'")
+        requirement_columns = [row["name"] for row in conn.execute("PRAGMA table_info(requirements)")]
+        if "created_by" not in requirement_columns:
+            conn.execute("ALTER TABLE requirements ADD COLUMN created_by TEXT NOT NULL DEFAULT ''")
+        if "created_by_name" not in requirement_columns:
+            conn.execute("ALTER TABLE requirements ADD COLUMN created_by_name TEXT NOT NULL DEFAULT ''")
         account_columns = [row["name"] for row in conn.execute("PRAGMA table_info(accounts)")]
         if "person_id" not in account_columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN person_id TEXT NOT NULL DEFAULT ''")
@@ -512,7 +519,7 @@ def read_state():
     with connect() as conn:
         people = [dict(row) for row in conn.execute("SELECT id, name, role FROM people ORDER BY name")]
         requirements = []
-        for row in conn.execute("SELECT id, title, link, status, kind FROM requirements ORDER BY title"):
+        for row in conn.execute("SELECT id, title, link, status, kind, created_by AS createdBy, created_by_name AS createdByName FROM requirements ORDER BY title"):
             req = dict(row)
             req["people"] = [
                 person["person_name"]
@@ -576,13 +583,15 @@ def write_state(state):
             )
         for req in state.get("requirements") or []:
             conn.execute(
-                "INSERT OR REPLACE INTO requirements (id, title, link, status, kind) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO requirements (id, title, link, status, kind, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     req.get("id"),
                     req.get("title", "未命名需求"),
                     req.get("link", ""),
                     req.get("status", "未开始"),
                     req.get("kind", ""),
+                    req.get("createdBy") or req.get("created_by") or "",
+                    req.get("createdByName") or req.get("created_by_name") or "",
                 ),
             )
             for index, name in enumerate(req.get("people") or []):
@@ -638,12 +647,14 @@ def upsert_requirements(conn, requirements):
         req_id = req.get("id")
         conn.execute(
             """
-            INSERT INTO requirements (id, title, link, status, kind) VALUES (?, ?, ?, ?, ?)
+            INSERT INTO requirements (id, title, link, status, kind, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               title = excluded.title,
               link = excluded.link,
               status = excluded.status,
-              kind = excluded.kind
+              kind = excluded.kind,
+              created_by = excluded.created_by,
+              created_by_name = excluded.created_by_name
             """,
             (
                 req_id,
@@ -651,6 +662,8 @@ def upsert_requirements(conn, requirements):
                 req.get("link", ""),
                 req.get("status", "未开始"),
                 req.get("kind", ""),
+                req.get("createdBy") or req.get("created_by") or "",
+                req.get("createdByName") or req.get("created_by_name") or "",
             ),
         )
         conn.execute("DELETE FROM requirement_people WHERE requirement_id = ?", (req_id,))
