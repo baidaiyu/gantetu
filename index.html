@@ -99,11 +99,38 @@
         </label>
         <label class="field">
           <span>密码</span>
-          <input id="loginPasswordInput" required type="password" autocomplete="current-password" placeholder="输入密码" />
+          <input id="loginPasswordInput" required type="password" autocomplete="current-password" placeholder="初次登录，密码为123456" />
         </label>
         <div class="dialog-actions">
           <span class="form-error" id="loginFormError"></span>
           <button class="primary-action" type="submit">登录</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="config-dialog narrow-dialog" id="resetPasswordDialog">
+      <form id="resetPasswordForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">初次登录</p>
+            <h2>重设登录密码</h2>
+          </div>
+        </div>
+        <label class="field">
+          <span>当前密码</span>
+          <input id="currentPasswordInput" required type="password" autocomplete="current-password" placeholder="初始密码 123456" />
+        </label>
+        <label class="field">
+          <span>新密码</span>
+          <input id="newPasswordInput" required type="password" autocomplete="new-password" placeholder="至少 6 位" />
+        </label>
+        <label class="field">
+          <span>确认新密码</span>
+          <input id="confirmPasswordInput" required type="password" autocomplete="new-password" placeholder="再次输入新密码" />
+        </label>
+        <div class="dialog-actions">
+          <span class="form-error" id="resetPasswordFormError"></span>
+          <button class="primary-action" type="submit">确认修改</button>
         </div>
       </form>
     </dialog>
@@ -459,10 +486,7 @@
               <span>平台角色</span>
               <input id="accountRoleInput" readonly value="请选择人员" />
             </label>
-            <label class="field">
-              <span>密码</span>
-              <input id="accountPasswordInput" type="password" placeholder="新建必填；编辑时留空则不修改" autocomplete="new-password" />
-            </label>
+            <small class="field-hint">新建账号的初始密码统一为 123456，首次登录后需要本人重设密码。</small>
           </section>
         </div>
         <div class="dialog-actions">
@@ -475,6 +499,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260525-account-link"></script>
+    <script src="./assets/app.js?v=20260526-password-reset"></script>
   </body>
 </html>

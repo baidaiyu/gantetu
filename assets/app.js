@@ -103,6 +103,12 @@ const els = {
   loginUsernameInput: document.querySelector("#loginUsernameInput"),
   loginPasswordInput: document.querySelector("#loginPasswordInput"),
   loginFormError: document.querySelector("#loginFormError"),
+  resetPasswordDialog: document.querySelector("#resetPasswordDialog"),
+  resetPasswordForm: document.querySelector("#resetPasswordForm"),
+  currentPasswordInput: document.querySelector("#currentPasswordInput"),
+  newPasswordInput: document.querySelector("#newPasswordInput"),
+  confirmPasswordInput: document.querySelector("#confirmPasswordInput"),
+  resetPasswordFormError: document.querySelector("#resetPasswordFormError"),
   toastStack: document.querySelector("#toastStack"),
   addRequirementButton: document.querySelector("#addRequirementButton"),
   addVersionButton: document.querySelector("#addVersionButton"),
@@ -213,7 +219,6 @@ const els = {
   accountUsernameInput: document.querySelector("#accountUsernameInput"),
   accountPersonInput: document.querySelector("#accountPersonInput"),
   accountRoleInput: document.querySelector("#accountRoleInput"),
-  accountPasswordInput: document.querySelector("#accountPasswordInput"),
   newAccountButton: document.querySelector("#newAccountButton"),
   closeAccountDialog: document.querySelector("#closeAccountDialog"),
   cancelAccountButton: document.querySelector("#cancelAccountButton"),
@@ -545,6 +550,13 @@ async function login(username, password) {
     body: JSON.stringify({ username, password }),
   });
   return payload.user;
+}
+
+async function changePassword(currentPassword, newPassword) {
+  await apiRequest("/api/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
 }
 
 async function logout() {
@@ -2079,7 +2091,6 @@ function clearAccountForm() {
   els.accountId.value = "";
   els.accountUsernameInput.value = "";
   renderAccountPersonOptions("");
-  els.accountPasswordInput.value = "";
   els.deleteAccountButton.hidden = true;
   renderAccountManager("");
 }
@@ -2090,7 +2101,6 @@ function editAccount(account) {
   els.accountId.value = account.id;
   els.accountUsernameInput.value = account.username;
   renderAccountPersonOptions(account.personId);
-  els.accountPasswordInput.value = "";
   els.deleteAccountButton.hidden = account.username === "admin";
   renderAccountManager(account.id);
 }
@@ -2111,14 +2121,12 @@ async function saveAccount() {
     id: els.accountId.value,
     username: els.accountUsernameInput.value.trim(),
     personId: els.accountPersonInput.value,
-    password: els.accountPasswordInput.value,
   };
   try {
     const payload = await apiRequest("/api/accounts", { method: "POST", body: JSON.stringify(data) });
     accounts = payload.accounts || [];
-    els.accountPasswordInput.value = "";
     renderAccountManager(data.id);
-    showToast("success", "账号已保存", "账号、角色和人员信息已更新。");
+    showToast("success", "账号已保存", "新账号初始密码为 123456，首次登录后需要本人重设密码。");
     const remoteState = await loadRemoteState();
     if (remoteState) {
       lastSyncedState = cloneState(remoteState);
@@ -2204,6 +2212,15 @@ function render() {
   renderTimeline(filteredRequirements());
 }
 
+function openResetPasswordDialog() {
+  els.resetPasswordFormError.textContent = "";
+  els.currentPasswordInput.value = "";
+  els.newPasswordInput.value = "";
+  els.confirmPasswordInput.value = "";
+  if (els.loginDialog.open) els.loginDialog.close();
+  if (!els.resetPasswordDialog.open) els.resetPasswordDialog.showModal();
+}
+
 async function init() {
   if (!loginEventsBound) {
     loginEventsBound = true;
@@ -2212,9 +2229,29 @@ async function init() {
       els.loginFormError.textContent = "";
       try {
         currentUser = await login(els.loginUsernameInput.value, els.loginPasswordInput.value);
+        if (currentUser.mustResetPassword) {
+          openResetPasswordDialog();
+          return;
+        }
         window.location.reload();
       } catch (error) {
         els.loginFormError.textContent = error.message;
+      }
+    });
+    els.resetPasswordForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      els.resetPasswordFormError.textContent = "";
+      const nextPassword = els.newPasswordInput.value;
+      if (nextPassword !== els.confirmPasswordInput.value) {
+        els.resetPasswordFormError.textContent = "两次输入的新密码不一致。";
+        return;
+      }
+      try {
+        await changePassword(els.currentPasswordInput.value, nextPassword);
+        showToast("success", "密码已修改", "请使用新密码重新登录。");
+        window.location.reload();
+      } catch (error) {
+        els.resetPasswordFormError.textContent = error.message;
       }
     });
   }
@@ -2222,6 +2259,10 @@ async function init() {
   if (!currentUser) {
     els.loginUsernameInput.value = "admin";
     els.loginDialog.showModal();
+    return;
+  }
+  if (currentUser.mustResetPassword) {
+    openResetPasswordDialog();
     return;
   }
   currentRole = currentUser.role;
