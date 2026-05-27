@@ -180,6 +180,7 @@ const els = {
   otherWorkDialogTitle: document.querySelector("#otherWorkDialogTitle"),
   otherWorkId: document.querySelector("#otherWorkId"),
   otherWorkTitleInput: document.querySelector("#otherWorkTitleInput"),
+  otherWorkLinkInput: document.querySelector("#otherWorkLinkInput"),
   otherWorkStartInput: document.querySelector("#otherWorkStartInput"),
   otherWorkEndInput: document.querySelector("#otherWorkEndInput"),
   otherWorkStatusInput: document.querySelector("#otherWorkStatusInput"),
@@ -1765,6 +1766,7 @@ function openOtherWorkDialog(work) {
   els.otherWorkId.value = work?.id || "";
   els.otherWorkDialogTitle.textContent = work ? "编辑其他工作" : "登记其他工作";
   els.otherWorkTitleInput.value = req?.title || "";
+  els.otherWorkLinkInput.value = req?.link || "";
   els.otherWorkStartInput.value = work?.start || todayKey();
   els.otherWorkEndInput.value = work?.end || todayKey();
   els.otherWorkStatusInput.value = req?.status || "进行中";
@@ -1784,6 +1786,11 @@ function saveOtherWork() {
     els.otherWorkFormError.textContent = "请填写工作标题和时间。";
     return;
   }
+  const link = els.otherWorkLinkInput.value.trim();
+  if (link && !/^https?:\/\//i.test(link)) {
+    els.otherWorkFormError.textContent = "工作链接需要以 http:// 或 https:// 开头。";
+    return;
+  }
   if (!els.otherWorkContentInput.value.trim() && !otherWorkImageDraft.length) {
     els.otherWorkFormError.textContent = "请填写工作内容，或粘贴至少一张图片。";
     return;
@@ -1797,6 +1804,7 @@ function saveOtherWork() {
     const req = requirementById(existingWork.requirementId);
     if (req) {
       req.title = els.otherWorkTitleInput.value.trim();
+      req.link = link;
       req.people = [currentPerson];
       req.status = els.otherWorkStatusInput.value;
       req.kind = "other";
@@ -1814,6 +1822,7 @@ function saveOtherWork() {
   }
   const req = normalizeRequirement({
     title: els.otherWorkTitleInput.value.trim(),
+    link,
     people: [currentPerson],
     status: els.otherWorkStatusInput.value,
     kind: "other",

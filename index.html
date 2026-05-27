@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260526-work-mine-filter" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260527-other-work-link" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -345,6 +345,10 @@
             <input id="otherWorkTitleInput" required placeholder="输入工作标题" />
           </label>
           <label class="field">
+            <span>工作链接</span>
+            <input id="otherWorkLinkInput" type="url" placeholder="https://..." />
+          </label>
+          <label class="field">
             <span>开始日期</span>
             <input id="otherWorkStartInput" required type="date" />
           </label>
@@ -513,6 +517,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260526-work-mine-filter"></script>
+    <script src="./assets/app.js?v=20260527-other-work-link"></script>
   </body>
 </html>
