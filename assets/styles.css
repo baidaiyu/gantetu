@@ -380,7 +380,7 @@ h2 {
   box-shadow: var(--shadow);
   display: grid;
   gap: 14px;
-  grid-template-columns: auto auto 170px 170px minmax(220px, 1fr);
+  grid-template-columns: auto auto 170px 170px minmax(220px, 1fr) auto;
   margin-bottom: 18px;
   padding: 14px;
 }
@@ -426,6 +426,11 @@ h2 {
   font-size: 12px;
   font-weight: 800;
   padding-right: 2px;
+}
+
+.export-action {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .mode-button {
@@ -1990,8 +1995,13 @@ button.calendar-admin-day:hover {
   .view-switch,
   .version-mode,
   .month-field,
-  .search-field {
+  .search-field,
+  .export-action {
     grid-column: 1 / -1;
+  }
+
+  .export-action {
+    justify-self: stretch;
   }
 
   .form-grid,

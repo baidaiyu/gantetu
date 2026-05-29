@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260527-other-work-link" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260529-export-work" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -66,6 +66,7 @@
           <span>搜索需求</span>
           <input id="searchInput" type="search" placeholder="输入需求、版本、模块或人员" />
         </label>
+        <button class="secondary-action export-action" id="exportWorkButton" type="button">导出工作</button>
       </section>
 
       <section class="content-grid">
@@ -517,6 +518,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260527-other-work-link"></script>
+    <script src="./assets/app.js?v=20260529-export-work"></script>
   </body>
 </html>

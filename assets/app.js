@@ -85,6 +85,7 @@ const els = {
   personFilter: document.querySelector("#personFilter"),
   statusFilter: document.querySelector("#statusFilter"),
   search: document.querySelector("#searchInput"),
+  exportWorkButton: document.querySelector("#exportWorkButton"),
   peopleLoad: document.querySelector("#peopleLoad"),
   rangeLabel: document.querySelector("#dateRangeLabel"),
   viewButtons: document.querySelectorAll(".view-button"),
@@ -970,6 +971,142 @@ function filteredRequirements() {
 function filteredWorkItems(reqIds = filteredRequirements().map((req) => req.id)) {
   const person = els.personFilter.value;
   return workItems.filter((work) => reqIds.includes(work.requirementId) && isWorkingPersonName(work.person) && (person === "全部" || work.person === person));
+}
+
+function exportVisibleDays() {
+  if (
+    currentView === "person" ||
+    (currentView === "requirement" && requirementViewMode === "calendar") ||
+    (currentView === "version" && versionViewMode === "calendar")
+  ) {
+    const monthDate = parseMonth(selectedMonth);
+    return eachVisibleDay(startOfMonth(monthDate), endOfMonth(monthDate));
+  }
+  const bounds = dateBounds();
+  return eachVisibleDay(bounds.start, bounds.end);
+}
+
+function visibleWorkDayCount(work, visibleDays) {
+  return visibleDays.filter((date) => rangeContains(work, formatDate(date))).length;
+}
+
+function workOverlapsVisibleDays(work, visibleDays) {
+  return visibleWorkDayCount(work, visibleDays) > 0;
+}
+
+function excelXmlEscape(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function excelCell(value) {
+  return `<Cell><Data ss:Type="String">${excelXmlEscape(value)}</Data></Cell>`;
+}
+
+function exportFilename() {
+  const viewLabel = { requirement: "按需求", person: "按人员", version: "按版本" }[currentView] || "工作";
+  return `工作导出-${viewLabel}-${todayKey()}.xls`;
+}
+
+function exportRowsForCurrentView() {
+  const reqs = filteredRequirements();
+  const visibleDays = exportVisibleDays();
+  const viewLabel = { requirement: "按需求", person: "按人员", version: "按版本" }[currentView] || currentView;
+  const makeRow = (req, work, version = requirementVersion(req.id)) => ({
+    视图: viewLabel,
+    版本: version?.name || "无目标版本",
+    需求: req.title,
+    需求链接: req.link || "",
+    状态: req.status,
+    执行人: work?.person || "",
+    工作开始: work?.start || "",
+    工作结束: work?.end || "",
+    当前范围内工作日: work ? String(visibleWorkDayCount(work, visibleDays)) : "0",
+    工作内容: work?.content || "",
+    创建人: req.createdByName || req.createdBy || "",
+  });
+
+  if (currentView === "version") {
+    const reqIds = new Set(reqs.map((req) => req.id));
+    const rows = [];
+    versions
+      .filter((version) => version.requirementIds.some((id) => reqIds.has(id)))
+      .sort((a, b) => a.start.localeCompare(b.start) || a.name.localeCompare(b.name, "zh-CN"))
+      .forEach((version) => {
+        version.requirementIds
+          .map(requirementById)
+          .filter((req) => req && reqIds.has(req.id))
+          .forEach((req) => {
+            const works = filteredWorkItems([req.id]).filter((work) => workOverlapsVisibleDays(work, visibleDays));
+            if (!works.length) rows.push(makeRow(req, null, version));
+            works
+              .sort((a, b) => a.start.localeCompare(b.start) || a.person.localeCompare(b.person, "zh-CN"))
+              .forEach((work) => rows.push(makeRow(req, work, version)));
+          });
+      });
+    return rows;
+  }
+
+  const rows = [];
+  reqs
+    .slice()
+    .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"))
+    .forEach((req) => {
+      const works = filteredWorkItems([req.id]).filter((work) => workOverlapsVisibleDays(work, visibleDays));
+      if (!works.length && currentView === "requirement") rows.push(makeRow(req, null));
+      works
+        .sort((a, b) =>
+          currentView === "person"
+            ? a.person.localeCompare(b.person, "zh-CN") || a.start.localeCompare(b.start)
+            : a.start.localeCompare(b.start) || a.person.localeCompare(b.person, "zh-CN"),
+        )
+        .forEach((work) => rows.push(makeRow(req, work)));
+    });
+  if (currentView === "person") rows.sort((a, b) => a.执行人.localeCompare(b.执行人, "zh-CN") || a.工作开始.localeCompare(b.工作开始) || a.需求.localeCompare(b.需求, "zh-CN"));
+  return rows;
+}
+
+function exportCurrentWork() {
+  const rows = exportRowsForCurrentView();
+  if (!rows.length) {
+    showToast("error", "没有可导出的工作", "当前筛选范围下暂无工作数据。");
+    return;
+  }
+  const headers = ["视图", "版本", "需求", "需求链接", "状态", "执行人", "工作开始", "工作结束", "当前范围内工作日", "工作内容", "创建人"];
+  const filterRows = [
+    ["导出时间", new Date().toLocaleString("zh-CN")],
+    ["当前视图", { requirement: "按需求", person: "按人员", version: "按版本" }[currentView] || currentView],
+    ["同事筛选", els.personFilter.value || "全部"],
+    ["状态筛选", els.statusFilter.value || "全部"],
+    ["搜索", els.search.value.trim() || "无"],
+  ];
+  const xmlRows = [
+    ...filterRows.map((row) => `<Row>${row.map(excelCell).join("")}</Row>`),
+    `<Row></Row>`,
+    `<Row>${headers.map(excelCell).join("")}</Row>`,
+    ...rows.map((row) => `<Row>${headers.map((header) => excelCell(row[header])).join("")}</Row>`),
+  ].join("");
+  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="工作导出"><Table>${xmlRows}</Table></Worksheet>
+</Workbook>`;
+  const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = exportFilename();
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("success", "导出完成", `已导出 ${rows.length} 行工作数据。`);
 }
 
 function monthOptions() {
@@ -2377,6 +2514,7 @@ async function init() {
   els.addVersionButton.addEventListener("click", () => openVersionDialog());
   els.addWorkButton.addEventListener("click", () => openWorkDialog());
   els.addOtherWorkButton.addEventListener("click", () => openOtherWorkDialog());
+  els.exportWorkButton.addEventListener("click", exportCurrentWork);
   els.peopleManageButton.addEventListener("click", openPeopleDialog);
   els.accountManageButton.addEventListener("click", openAccountDialog);
   els.logoutButton.addEventListener("click", logout);
