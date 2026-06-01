@@ -1075,7 +1075,7 @@ function exportCurrentWork() {
     showToast("error", "没有可导出的工作", "当前筛选范围下暂无工作数据。");
     return;
   }
-  const headers = ["视图", "版本", "需求", "需求链接", "状态", "执行人", "工作开始", "工作结束", "当前范围内工作日", "工作内容", "创建人"];
+  const headers = ["视图", "版本", "需求", "需求链接", "工作内容", "状态", "执行人", "工作开始", "工作结束", "当前范围内工作日", "创建人"];
   const filterRows = [
     ["导出时间", new Date().toLocaleString("zh-CN")],
     ["当前视图", { requirement: "按需求", person: "按人员", version: "按版本" }[currentView] || currentView],
