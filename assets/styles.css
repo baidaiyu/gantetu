@@ -249,6 +249,19 @@ button {
   padding: 0 14px;
 }
 
+.user-badge select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  font: inherit;
+  padding: 0 18px 0 0;
+}
+
+.user-badge span {
+  white-space: nowrap;
+}
+
 .danger-action {
   background: #fff5f4;
   border: 1px solid #ecc0bc;
@@ -380,7 +393,7 @@ h2 {
   box-shadow: var(--shadow);
   display: grid;
   gap: 14px;
-  grid-template-columns: auto auto 170px 170px minmax(220px, 1fr) auto;
+  grid-template-columns: auto auto 170px 170px minmax(220px, 1fr) auto auto;
   margin-bottom: 18px;
   padding: 14px;
 }
@@ -430,6 +443,13 @@ h2 {
 
 .export-action {
   justify-self: end;
+  white-space: nowrap;
+}
+
+.toolbar-check {
+  align-self: center;
+  margin-top: 0;
+  min-height: 40px;
   white-space: nowrap;
 }
 
@@ -1448,7 +1468,7 @@ button.calendar-admin-day:hover {
   color: var(--ink);
   max-height: calc(100vh - 40px);
   max-width: calc(100vw - 40px);
-  overflow: auto;
+  overflow: hidden;
   padding: 0;
   width: min(900px, calc(100vw - 40px));
 }
@@ -1468,8 +1488,12 @@ button.calendar-admin-day:hover {
 }
 
 .manager-dialog {
+  box-sizing: border-box;
   display: grid;
   gap: 18px;
+  max-height: calc(100vh - 40px);
+  min-width: 0;
+  overflow: hidden;
   padding: 22px;
 }
 
@@ -1485,10 +1509,32 @@ button.calendar-admin-day:hover {
   background: #f7faf5;
   border: 1px solid var(--line);
   border-radius: 8px;
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(130px, 0.75fr) minmax(150px, 0.8fr) minmax(150px, 0.8fr) auto;
+  min-width: 0;
   padding: 14px;
+}
+
+.manager-filters .field {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.manager-filters .field:first-child {
+  flex-basis: 240px;
+}
+
+.manager-check {
+  align-self: center;
+  flex: 0 1 auto;
+  margin-top: 0;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+#managerResetFiltersButton {
+  flex: 0 0 auto;
 }
 
 .dialog-head,
@@ -1498,6 +1544,16 @@ button.calendar-admin-day:hover {
   display: flex;
   gap: 12px;
   justify-content: space-between;
+}
+
+.dialog-head,
+.section-head {
+  min-width: 0;
+}
+
+.dialog-head > div,
+.section-head > h3 {
+  min-width: 0;
 }
 
 .dialog-head h2,
@@ -1587,6 +1643,20 @@ button.calendar-admin-day:hover {
   accent-color: var(--green);
   height: 16px;
   width: 16px;
+}
+
+.role-picker {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px;
+}
+
+.role-choice {
+  margin-top: 0;
 }
 
 .people-picker {
@@ -1724,7 +1794,9 @@ button.calendar-admin-day:hover {
   display: grid;
   gap: 10px;
   max-height: min(560px, calc(100vh - 260px));
+  min-width: 0;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .pending-work-list {
@@ -1907,6 +1979,9 @@ button.calendar-admin-day:hover {
 
 .manager-actions {
   align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   margin-top: 0;
 }
 
@@ -1996,6 +2071,7 @@ button.calendar-admin-day:hover {
   .version-mode,
   .month-field,
   .search-field,
+  .toolbar-check,
   .export-action {
     grid-column: 1 / -1;
   }
@@ -2010,6 +2086,16 @@ button.calendar-admin-day:hover {
   .work-form-grid,
   .manager-filters {
     grid-template-columns: 1fr;
+  }
+
+  .manager-filters .field,
+  .manager-check,
+  #managerResetFiltersButton {
+    flex-basis: 100%;
+  }
+
+  #managerResetFiltersButton {
+    justify-content: center;
   }
 
   .work-requirement-field {

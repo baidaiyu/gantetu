@@ -1,0 +1,16 @@
+.git
+.DS_Store
+__pycache__/
+*.pyc
+docker-artifacts/
+data/*.sqlite
+data/*.sqlite-*
+data/*.db
+data/db.json
+data/safety-backups/
+data/write-logs/
+data/emergency-backups/
+.env
+.env.*
+node_modules/
+*.tar

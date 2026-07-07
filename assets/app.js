@@ -85,6 +85,8 @@ const els = {
   personFilter: document.querySelector("#personFilter"),
   statusFilter: document.querySelector("#statusFilter"),
   search: document.querySelector("#searchInput"),
+  mineOnlyField: document.querySelector("#mineOnlyField"),
+  mineOnlyInput: document.querySelector("#mineOnlyInput"),
   exportWorkButton: document.querySelector("#exportWorkButton"),
   peopleLoad: document.querySelector("#peopleLoad"),
   rangeLabel: document.querySelector("#dateRangeLabel"),
@@ -122,6 +124,8 @@ const els = {
   requirementId: document.querySelector("#requirementId"),
   requirementTitleInput: document.querySelector("#requirementTitleInput"),
   requirementLinkInput: document.querySelector("#requirementLinkInput"),
+  requirementVersionField: document.querySelector("#requirementVersionField"),
+  requirementVersionInput: document.querySelector("#requirementVersionInput"),
   requirementPeoplePicker: document.querySelector("#requirementPeoplePicker"),
   requirementStatusInput: document.querySelector("#requirementStatusInput"),
   closeRequirementDialog: document.querySelector("#closeRequirementDialog"),
@@ -135,6 +139,8 @@ const els = {
   managerStatusFilter: document.querySelector("#managerStatusFilter"),
   managerPersonFilter: document.querySelector("#managerPersonFilter"),
   managerVersionFilter: document.querySelector("#managerVersionFilter"),
+  managerMineOnlyField: document.querySelector("#managerMineOnlyField"),
+  managerMineOnlyInput: document.querySelector("#managerMineOnlyInput"),
   managerResetFiltersButton: document.querySelector("#managerResetFiltersButton"),
   closeRequirementManagerDialog: document.querySelector("#closeRequirementManagerDialog"),
   managerAddRequirementButton: document.querySelector("#managerAddRequirementButton"),
@@ -210,7 +216,7 @@ const els = {
   peopleList: document.querySelector("#peopleList"),
   personId: document.querySelector("#personId"),
   personNameInput: document.querySelector("#personNameInput"),
-  personRoleInput: document.querySelector("#personRoleInput"),
+  personRolePicker: document.querySelector("#personRolePicker"),
   newPersonButton: document.querySelector("#newPersonButton"),
   deletePersonButton: document.querySelector("#deletePersonButton"),
   closePeopleDialog: document.querySelector("#closePeopleDialog"),
@@ -387,11 +393,32 @@ function normalizeRequirement(input) {
   };
 }
 
+function normalizePersonRoles(input) {
+  const rawRoles = Array.isArray(input.roles) ? input.roles : splitList(input.role || "");
+  const roles = rawRoles.filter((role, index) => personRoles.includes(role) && rawRoles.indexOf(role) === index);
+  return roles.length ? roles : ["研发人员"];
+}
+
+function personRoleText(person) {
+  return normalizePersonRoles(person).join("、");
+}
+
+function accountRoleLabel(role) {
+  return accountRoles[role] || role || "研发人员";
+}
+
+function currentUserRoles() {
+  const roles = Array.isArray(currentUser?.roles) ? currentUser.roles.filter((role) => accountRoles[role]) : [];
+  return roles.length ? unique(roles) : [currentUser?.role || "developer"];
+}
+
 function normalizePerson(input) {
+  const roles = normalizePersonRoles(input);
   return {
     id: input.id || createId("person"),
     name: String(input.name || "").trim(),
-    role: personRoles.includes(input.role) ? input.role : "研发人员",
+    role: roles[0],
+    roles,
   };
 }
 
@@ -755,6 +782,10 @@ function canManageWork() {
   return currentRole === "pm";
 }
 
+function canManageOtherWork() {
+  return currentRole === "pm" || isExecutorRole();
+}
+
 function canManagePeople() {
   return currentRole === "admin";
 }
@@ -764,8 +795,8 @@ function isExecutorRole() {
 }
 
 function syncCurrentPersonOptions() {
-  const names = workingPeople();
-  const lockedName = currentUser && isExecutorRole() ? currentUser.name : "";
+  const lockedName = currentUser && canManageOtherWork() ? currentUser.name : "";
+  const names = unique([...workingPeople(), lockedName].filter(Boolean)).sort((a, b) => a.localeCompare(b, "zh-CN"));
   const previous = lockedName || currentPerson || els.currentPersonSelect.value;
   els.currentPersonSelect.innerHTML = names.length
     ? names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
@@ -776,7 +807,44 @@ function syncCurrentPersonOptions() {
 
 function pendingRequirementsForCurrentPerson() {
   if (!currentPerson) return [];
-  return requirements.filter((req) => req.people.includes(currentPerson) && !workItems.some((work) => work.requirementId === req.id && work.person === currentPerson));
+  return dedupePendingRequirements(
+    requirements.filter((req) => {
+      const hasActualWork = workItems.some(
+        (work) => work.requirementId === req.id && work.person === currentPerson && work.content !== PM_ASSIGNMENT_CONTENT,
+      );
+      return req.people.includes(currentPerson) && !hasActualWork;
+    }),
+  );
+}
+
+function normalizedRequirementIdentityText(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "");
+}
+
+function pendingRequirementKey(req) {
+  const peopleKey = [...req.people].sort((a, b) => a.localeCompare(b, "zh-CN")).join("|");
+  return `${normalizedRequirementIdentityText(req.title)}::${peopleKey}`;
+}
+
+function pendingRequirementRank(req) {
+  const versionRank = requirementVersion(req.id) ? 4 : 0;
+  const linkRank = req.link ? 2 : 0;
+  const workRank = workItems.some((work) => work.requirementId === req.id) ? 1 : 0;
+  return versionRank + linkRank + workRank;
+}
+
+function dedupePendingRequirements(reqs) {
+  const byIdentity = new Map();
+  reqs.forEach((req) => {
+    const key = pendingRequirementKey(req);
+    const existing = byIdentity.get(key);
+    if (!existing || pendingRequirementRank(req) > pendingRequirementRank(existing)) {
+      byIdentity.set(key, req);
+    }
+  });
+  return reqs.filter((req) => byIdentity.get(pendingRequirementKey(req))?.id === req.id);
 }
 
 function isOtherWorkRequirement(req) {
@@ -787,25 +855,46 @@ function isOtherWorkRequirement(req) {
 }
 
 function canEditOtherWork(work) {
-  return isExecutorRole() && work?.person === currentPerson && isOtherWorkRequirement(requirementById(work.requirementId));
+  return canManageOtherWork() && work?.person === currentPerson && isOtherWorkRequirement(requirementById(work.requirementId));
 }
 
 function canEditOwnWork(work) {
   return isExecutorRole() && work?.person === currentPerson && work.content !== PM_ASSIGNMENT_CONTENT;
 }
 
+function renderCurrentUserBadge() {
+  if (!currentUser) {
+    els.currentUserBadge.textContent = "未登录";
+    return;
+  }
+  const roles = currentUserRoles();
+  if (roles.length <= 1) {
+    els.currentUserBadge.textContent = `${currentUser.name} · ${accountRoleLabel(currentRole)}`;
+    return;
+  }
+  els.currentUserBadge.innerHTML = `<span>${escapeHtml(currentUser.name)}</span><span aria-hidden="true">·</span><select id="userRoleSelect" aria-label="切换当前角色">${roles
+    .map((role) => `<option value="${escapeHtml(role)}" ${role === currentRole ? "selected" : ""}>${escapeHtml(accountRoleLabel(role))}</option>`)
+    .join("")}</select>`;
+}
+
 function applyRolePermissions() {
   syncCurrentPersonOptions();
   const showExecutorTools = isExecutorRole();
   els.currentPersonField.hidden = true;
-  els.currentUserBadge.textContent = currentUser ? `${currentUser.name} · ${accountRoles[currentUser.role] || currentUser.role}` : "未登录";
+  renderCurrentUserBadge();
   els.accountManageButton.hidden = currentRole !== "admin";
   els.peopleManageButton.hidden = !canManagePeople();
   els.addRequirementButton.hidden = !canCreateRequirement();
   els.addVersionButton.hidden = !canManageVersion();
   els.addWorkButton.hidden = !canManageWork();
-  els.addOtherWorkButton.hidden = !showExecutorTools;
+  els.addOtherWorkButton.hidden = !canManageOtherWork();
   els.holidayButton.hidden = currentRole !== "admin";
+  els.mineOnlyField.hidden = currentRole !== "pm";
+  els.managerMineOnlyField.hidden = currentRole !== "pm";
+  if (currentRole !== "pm") {
+    els.mineOnlyInput.checked = false;
+    els.managerMineOnlyInput.checked = false;
+  }
   const pendingCount = showExecutorTools ? pendingRequirementsForCurrentPerson().length : 0;
   els.pendingWorkButton.hidden = !showExecutorTools;
   els.pendingWorkButton.textContent = `待处理工作（${pendingCount}）`;
@@ -822,15 +911,26 @@ function personByName(name) {
 
 function isWorkingPersonName(name) {
   const person = personByName(name);
-  return person?.role === "设计师" || person?.role === "研发人员" || person?.role === "测试人员";
+  if (!person) return false;
+  return normalizePersonRoles(person || {}).some((role) => role === "设计师" || role === "研发人员" || role === "测试人员");
 }
 
 function workingPeople() {
   return allPeople().filter(isWorkingPersonName);
 }
 
+function reportPeople() {
+  return unique([...workingPeople(), ...workItems.map((work) => work.person).filter((name) => personByName(name))]).sort((a, b) =>
+    a.localeCompare(b, "zh-CN"),
+  );
+}
+
+function isReportPersonName(name) {
+  return isWorkingPersonName(name) || workItems.some((work) => work.person === name && isOtherWorkRequirement(requirementById(work.requirementId)));
+}
+
 function visibleWorkerNames(names) {
-  return unique(names).filter(isWorkingPersonName);
+  return unique(names).filter(isReportPersonName);
 }
 
 function selectedOptions(select) {
@@ -950,7 +1050,7 @@ function fillSelect(select, values, allLabel, previousValue = "全部") {
 }
 
 function refreshFilters() {
-  fillSelect(els.personFilter, workingPeople(), "全部同事", els.personFilter.value);
+  fillSelect(els.personFilter, reportPeople(), "全部同事", els.personFilter.value);
   fillSelect(els.statusFilter, Object.keys(requirementStatusConfig), "全部状态", els.statusFilter.value);
 }
 
@@ -958,19 +1058,25 @@ function filteredRequirements() {
   const person = els.personFilter.value;
   const status = els.statusFilter.value;
   const query = els.search.value.trim().toLowerCase();
+  const mineOnly = currentRole === "pm" && els.mineOnlyInput.checked;
   return requirements.filter((req) => {
     const relatedVersion = requirementVersion(req.id);
     const personMatch =
       person === "全部" || req.people.includes(person) || workItems.some((work) => work.requirementId === req.id && work.person === person);
     const statusMatch = status === "全部" || req.status === status;
     const queryText = `${req.title} ${visibleWorkerNames(req.people).join(" ")} ${relatedVersion?.name || ""}`.toLowerCase();
-    return personMatch && statusMatch && (!query || queryText.includes(query));
+    const mineMatch = !mineOnly || requirementCreatedByCurrentUser(req);
+    return personMatch && statusMatch && mineMatch && (!query || queryText.includes(query));
   });
 }
 
 function filteredWorkItems(reqIds = filteredRequirements().map((req) => req.id)) {
   const person = els.personFilter.value;
-  return workItems.filter((work) => reqIds.includes(work.requirementId) && isWorkingPersonName(work.person) && (person === "全部" || work.person === person));
+  return workItems.filter((work) => {
+    const req = requirementById(work.requirementId);
+    const visiblePerson = isWorkingPersonName(work.person) || isOtherWorkRequirement(req);
+    return reqIds.includes(work.requirementId) && visiblePerson && (person === "全部" || work.person === person);
+  });
 }
 
 function exportVisibleDays() {
@@ -1192,7 +1298,7 @@ function buildPersonRows(reqs, visibleDays) {
   const query = els.search.value.trim().toLowerCase();
   const reqIds = reqs.map((req) => req.id);
   const works = filteredWorkItems(reqIds);
-  const personNames = workingPeople().filter((name) => personFilter === "全部" || name === personFilter);
+  const personNames = reportPeople().filter((name) => personFilter === "全部" || name === personFilter);
   return personNames
     .map((name) => {
       const personWorks = works.filter((work) => work.person === name);
@@ -1222,7 +1328,7 @@ function buildPersonRows(reqs, visibleDays) {
     })
     .filter((row) => !query || row.queryText.includes(query))
     .sort((a, b) => {
-      if (isExecutorRole() && currentPerson) {
+      if (canManageOtherWork() && currentPerson) {
         if (a.primary === currentPerson) return -1;
         if (b.primary === currentPerson) return 1;
       }
@@ -1310,7 +1416,7 @@ function renderPersonLoadView(reqs) {
   const visibleDays = eachVisibleDay(start, end);
   const rows = buildPersonRows(reqs, visibleDays);
   if (selectedLoadPerson && !rows.some((row) => row.primary === selectedLoadPerson)) selectedLoadPerson = "";
-  if (isExecutorRole() && currentPerson && rows.some((row) => row.primary === currentPerson) && (!selectedLoadPerson || !personLoadManualSelection)) {
+  if (canManageOtherWork() && currentPerson && rows.some((row) => row.primary === currentPerson) && (!selectedLoadPerson || !personLoadManualSelection)) {
     selectedLoadPerson = currentPerson;
   }
   renderSummary(reqs, visibleDays);
@@ -1560,15 +1666,35 @@ function renderCalendarSide(version, versionNames) {
     .join("")}</ol></div>`;
 }
 
+function renderRequirementVersionOptions(req) {
+  els.requirementVersionInput.innerHTML = "";
+  els.requirementVersionInput.append(new Option("无目标版本", ""));
+  versions.forEach((version) => {
+    els.requirementVersionInput.append(new Option(version.name, version.id));
+  });
+  const currentVersionId = req ? requirementVersion(req.id)?.id || "" : "";
+  els.requirementVersionInput.value = versions.some((version) => version.id === currentVersionId) ? currentVersionId : "";
+}
+
+function syncRequirementTargetVersion(requirementId, versionId) {
+  versions.forEach((version) => {
+    version.requirementIds = version.requirementIds.filter((id) => id !== requirementId);
+  });
+  const targetVersion = versionId ? versionById(versionId) : null;
+  if (targetVersion) targetVersion.requirementIds = unique([...targetVersion.requirementIds, requirementId]);
+}
+
 function openRequirementDialog(req) {
   els.requirementFormError.textContent = "";
   els.requirementForm.reset();
   renderPeoplePicker(req?.people || []);
+  renderRequirementVersionOptions(req);
   els.requirementId.value = req?.id || "";
   els.requirementDialogTitle.textContent = req ? "编辑需求" : "新增需求";
   els.requirementTitleInput.value = req?.title || "";
   els.requirementLinkInput.value = req?.link || "";
   els.requirementStatusInput.value = req?.status || "未开始";
+  els.requirementVersionField.hidden = currentRole !== "pm";
   els.deleteRequirementButton.hidden = !req;
   els.requirementDialog.showModal();
 }
@@ -1591,6 +1717,7 @@ function saveRequirement() {
   const index = requirements.findIndex((item) => item.id === req.id);
   if (index >= 0) requirements.splice(index, 1, req);
   else requirements.push(req);
+  if (currentRole === "pm") syncRequirementTargetVersion(req.id, els.requirementVersionInput.value);
   saveState();
   els.requirementDialog.close();
   render();
@@ -1636,13 +1763,15 @@ function managerFilteredRequirements(baseReqs) {
   const status = els.managerStatusFilter.value;
   const person = els.managerPersonFilter.value;
   const versionName = els.managerVersionFilter.value;
+  const mineOnly = currentRole === "pm" && els.managerMineOnlyInput.checked;
   return baseReqs.filter((req) => {
     const summary = requirementWorkSummary(req);
     const searchText = `${req.title} ${summary.versionName} ${summary.peopleNames.join(" ")} ${req.status}`.toLowerCase();
     const statusMatch = status === "全部" || req.status === status;
     const personMatch = person === "全部" || summary.peopleNames.includes(person);
     const versionMatch = versionName === "全部" || summary.versionName === versionName;
-    return (!query || searchText.includes(query)) && statusMatch && personMatch && versionMatch;
+    const mineMatch = !mineOnly || requirementCreatedByCurrentUser(req);
+    return (!query || searchText.includes(query)) && statusMatch && personMatch && versionMatch && mineMatch;
   });
 }
 
@@ -1662,6 +1791,7 @@ function saveManagerFilters() {
       status: els.managerStatusFilter.value,
       person: els.managerPersonFilter.value,
       version: els.managerVersionFilter.value,
+      mineOnly: els.managerMineOnlyInput.checked,
     }),
   );
 }
@@ -1670,8 +1800,9 @@ function applyManagerFilters() {
   const saved = readManagerFilters();
   els.managerSearchInput.value = saved.search || "";
   els.managerStatusFilter.value = saved.status || "全部";
-  els.managerPersonFilter.value = saved.person || (isExecutorRole() && currentPerson ? currentPerson : "全部");
+  els.managerPersonFilter.value = saved.person || (canManageOtherWork() && currentPerson ? currentPerson : "全部");
   els.managerVersionFilter.value = saved.version || "全部";
+  els.managerMineOnlyInput.checked = currentRole === "pm" && Boolean(saved.mineOnly);
 }
 
 function renderRequirementManager() {
@@ -2150,17 +2281,31 @@ function renderPeopleManager(selectedId = els.personId.value) {
     ? sortedPeople
         .map(
           (person) =>
-            `<button class="people-row ${person.id === selectedId ? "is-active" : ""}" type="button" data-action="edit-person" data-id="${person.id}"><span>${escapeHtml(person.name)}</span><b>${escapeHtml(person.role)}</b></button>`,
+            `<button class="people-row ${person.id === selectedId ? "is-active" : ""}" type="button" data-action="edit-person" data-id="${person.id}"><span>${escapeHtml(person.name)}</span><b>${escapeHtml(personRoleText(person))}</b></button>`,
         )
         .join("")
     : `<div class="empty-state people-empty">还没有人员，请先新建。</div>`;
+}
+
+function renderPersonRolePicker(selectedRoles = ["研发人员"]) {
+  const selected = new Set(selectedRoles);
+  els.personRolePicker.innerHTML = personRoles
+    .map(
+      (role) =>
+        `<label class="inline-check role-choice"><input type="checkbox" value="${escapeHtml(role)}" ${selected.has(role) ? "checked" : ""} /><span>${escapeHtml(role)}</span></label>`,
+    )
+    .join("");
+}
+
+function selectedPersonRoles() {
+  return [...els.personRolePicker.querySelectorAll("input:checked")].map((input) => input.value);
 }
 
 function clearPersonForm() {
   els.personFormError.textContent = "";
   els.personId.value = "";
   els.personNameInput.value = "";
-  els.personRoleInput.value = "研发人员";
+  renderPersonRolePicker(["研发人员"]);
   els.deletePersonButton.hidden = true;
   renderPeopleManager("");
 }
@@ -2170,7 +2315,7 @@ function editPerson(person) {
   els.personFormError.textContent = "";
   els.personId.value = person.id;
   els.personNameInput.value = person.name;
-  els.personRoleInput.value = person.role;
+  renderPersonRolePicker(normalizePersonRoles(person));
   els.deletePersonButton.hidden = false;
   renderPeopleManager(person.id);
 }
@@ -2183,9 +2328,13 @@ function openPeopleDialog() {
 
 function savePerson() {
   const name = els.personNameInput.value.trim();
-  const role = els.personRoleInput.value;
+  const roles = selectedPersonRoles();
   if (!name) {
     els.personFormError.textContent = "请填写姓名。";
+    return;
+  }
+  if (!roles.length) {
+    els.personFormError.textContent = "请至少选择一个角色。";
     return;
   }
   const duplicate = people.find((person) => person.name === name && person.id !== els.personId.value);
@@ -2195,7 +2344,7 @@ function savePerson() {
   }
   const id = els.personId.value || createId("person");
   const previous = people.find((person) => person.id === id);
-  const next = normalizePerson({ id, name, role });
+  const next = normalizePerson({ id, name, roles });
   if (previous && previous.name !== name) {
     requirements.forEach((req) => {
       req.people = req.people.map((personName) => (personName === previous.name ? name : personName));
@@ -2239,7 +2388,7 @@ function renderAccountManager(selectedId = els.accountId.value) {
     ? accounts
         .map(
           (account) =>
-            `<button class="people-row ${account.id === selectedId ? "is-active" : ""}" type="button" data-action="edit-account" data-id="${account.id}"><span>${escapeHtml(account.username)}</span><b>${escapeHtml(account.name)} · ${escapeHtml(accountRoles[account.role] || account.role)}</b></button>`,
+            `<button class="people-row ${account.id === selectedId ? "is-active" : ""}" type="button" data-action="edit-account" data-id="${account.id}"><span>${escapeHtml(account.username)}</span><b>${escapeHtml(account.name)} · ${escapeHtml((account.roleLabels || [accountRoleLabel(account.role)]).join("、"))}</b></button>`,
         )
         .join("")
     : `<div class="empty-state people-empty">还没有账号。</div>`;
@@ -2249,7 +2398,7 @@ function renderAccountPersonOptions(selectedPersonId = "") {
   const sortedPeople = [...people].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   els.accountPersonInput.innerHTML = [
     `<option value="">选择已有人员</option>`,
-    ...sortedPeople.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)} · ${escapeHtml(person.role)}</option>`),
+    ...sortedPeople.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)} · ${escapeHtml(personRoleText(person))}</option>`),
   ].join("");
   els.accountPersonInput.value = selectedPersonId && sortedPeople.some((person) => person.id === selectedPersonId) ? selectedPersonId : "";
   updateAccountRolePreview();
@@ -2257,7 +2406,7 @@ function renderAccountPersonOptions(selectedPersonId = "") {
 
 function updateAccountRolePreview() {
   const person = people.find((item) => item.id === els.accountPersonInput.value);
-  els.accountRoleInput.value = person ? person.role : "请选择人员";
+  els.accountRoleInput.value = person ? personRoleText(person) : "请选择人员";
 }
 
 function clearAccountForm() {
@@ -2366,7 +2515,8 @@ function handleGridClick(event) {
 
 function render() {
   if (currentUser) {
-    currentRole = currentUser.role;
+    const roles = currentUserRoles();
+    if (!roles.includes(currentRole)) currentRole = roles.includes(currentUser.role) ? currentUser.role : roles[0];
     currentPerson = currentUser.name || "";
     els.roleSelect.value = currentRole;
   } else {
@@ -2442,7 +2592,8 @@ async function init() {
     return;
   }
   document.body.classList.remove("auth-view");
-  currentRole = currentUser.role;
+  const roles = currentUserRoles();
+  currentRole = roles.includes(currentUser.role) ? currentUser.role : roles[0];
   currentPerson = currentUser.name || "";
   els.roleSelect.value = currentRole;
   const state = await loadState();
@@ -2465,6 +2616,15 @@ async function init() {
     personLoadManualSelection = false;
     render();
   });
+  els.currentUserBadge.addEventListener("input", (event) => {
+    if (event.target.id !== "userRoleSelect") return;
+    const nextRole = event.target.value;
+    if (!currentUserRoles().includes(nextRole)) return;
+    currentRole = nextRole;
+    personLoadManualSelection = false;
+    selectedLoadPerson = "";
+    render();
+  });
   els.pendingWorkButton.addEventListener("click", openPendingWorkDialog);
   els.closePendingWorkDialog.addEventListener("click", () => els.pendingWorkDialog.close());
   els.pendingWorkList.addEventListener("click", handlePendingWorkClick);
@@ -2475,6 +2635,7 @@ async function init() {
   els.personFilter.addEventListener("input", render);
   els.statusFilter.addEventListener("input", render);
   els.search.addEventListener("input", render);
+  els.mineOnlyInput.addEventListener("input", render);
   els.grid.addEventListener("click", handleGridClick);
   els.grid.addEventListener("input", (event) => {
     if (event.target.id === "calendarMonthFilter") {
@@ -2491,7 +2652,7 @@ async function init() {
   els.viewButtons.forEach((button) => {
     button.addEventListener("click", () => {
       currentView = button.dataset.view;
-      if (currentView === "person" && isExecutorRole() && currentPerson) {
+      if (currentView === "person" && canManageOtherWork() && currentPerson) {
         selectedLoadPerson = currentPerson;
         personLoadManualSelection = false;
       }
@@ -2548,7 +2709,7 @@ async function init() {
   });
   els.closeRequirementManagerDialog.addEventListener("click", () => els.requirementManagerDialog.close());
   els.requirementManagerList.addEventListener("click", handleRequirementManagerClick);
-  [els.managerSearchInput, els.managerStatusFilter, els.managerPersonFilter, els.managerVersionFilter].forEach((control) => {
+  [els.managerSearchInput, els.managerStatusFilter, els.managerPersonFilter, els.managerVersionFilter, els.managerMineOnlyInput].forEach((control) => {
     control.addEventListener("input", () => {
       saveManagerFilters();
       renderRequirementManager();
@@ -2557,8 +2718,9 @@ async function init() {
   els.managerResetFiltersButton.addEventListener("click", () => {
     els.managerSearchInput.value = "";
     els.managerStatusFilter.value = "全部";
-    els.managerPersonFilter.value = isExecutorRole() && currentPerson ? currentPerson : "全部";
+    els.managerPersonFilter.value = canManageOtherWork() && currentPerson ? currentPerson : "全部";
     els.managerVersionFilter.value = "全部";
+    els.managerMineOnlyInput.checked = false;
     saveManagerFilters();
     renderRequirementManager();
   });

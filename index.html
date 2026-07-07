@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260529-export-work" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260611-pm-other-work" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -65,6 +65,10 @@
         <label class="field search-field">
           <span>搜索需求</span>
           <input id="searchInput" type="search" placeholder="输入需求、版本、模块或人员" />
+        </label>
+        <label class="inline-check toolbar-check" id="mineOnlyField" hidden>
+          <input id="mineOnlyInput" type="checkbox" />
+          <span>只看我创建的需求</span>
         </label>
         <button class="secondary-action export-action" id="exportWorkButton" type="button">导出工作</button>
       </section>
@@ -164,6 +168,10 @@
           <span>需求链接</span>
           <input id="requirementLinkInput" type="url" placeholder="https://..." />
         </label>
+        <label class="field" id="requirementVersionField" hidden>
+          <span>目标版本</span>
+          <select id="requirementVersionInput"></select>
+        </label>
         <label class="field">
           <span>执行人</span>
           <div class="people-picker" id="requirementPeoplePicker" role="group" aria-label="选择执行人"></div>
@@ -215,6 +223,10 @@
           <label class="field">
             <span>所属版本</span>
             <select id="managerVersionFilter"></select>
+          </label>
+          <label class="inline-check manager-check" id="managerMineOnlyField" hidden>
+            <input id="managerMineOnlyInput" type="checkbox" />
+            <span>只看我创建的需求</span>
           </label>
           <button class="secondary-action compact" id="managerResetFiltersButton" type="button">重置</button>
         </div>
@@ -453,14 +465,7 @@
             </label>
             <label class="field">
               <span>角色</span>
-              <select id="personRoleInput" required>
-                <option>领导</option>
-                <option>产品经理</option>
-                <option>设计师</option>
-                <option>研发人员</option>
-                <option>测试人员</option>
-                <option>管理员</option>
-              </select>
+              <div class="role-picker" id="personRolePicker" role="group" aria-label="选择人员角色"></div>
             </label>
           </section>
         </div>
@@ -518,6 +523,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260529-export-work"></script>
+    <script src="./assets/app.js?v=20260611-pm-other-work"></script>
   </body>
 </html>

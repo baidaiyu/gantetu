@@ -21,8 +21,8 @@ WRITE_LOG_DIR = DATA_DIR / "write-logs"
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "4174"))
 SESSION_MAX_AGE = 60 * 60 * 24 * 14
-DEFAULT_ACCOUNT_PASSWORD = "123456"
-ADMIN_PASSWORD = "wl8430481"
+DEFAULT_ACCOUNT_PASSWORD = os.environ.get("DEFAULT_ACCOUNT_PASSWORD", "123456")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", DEFAULT_ACCOUNT_PASSWORD)
 
 ROLE_LABELS = {
     "admin": "管理员",
@@ -72,22 +72,57 @@ def role_label(role):
     return ROLE_LABELS.get(role, "研发人员")
 
 
+def person_roles_from_value(value):
+    if isinstance(value, list):
+        raw_roles = value
+    else:
+        raw_roles = str(value or "").replace("，", ",").split(",")
+    roles = []
+    for raw_role in raw_roles:
+        role = (raw_role or "").strip()
+        if role in ACCOUNT_ROLES_BY_PERSON_ROLE and role not in roles:
+            roles.append(role)
+    return roles or ["研发人员"]
+
+
+def person_role_storage(person):
+    if isinstance(person, dict):
+        value = person.get("roles") if "roles" in person else person.get("role")
+    else:
+        value = person
+    roles = person_roles_from_value(value)
+    return ",".join(roles)
+
+
+def account_roles_from_person_role(person_role, fallback="developer"):
+    if person_role is None or person_role == "":
+        return [fallback if fallback in ROLE_LABELS else "developer"]
+    roles = [ACCOUNT_ROLES_BY_PERSON_ROLE[role] for role in person_roles_from_value(person_role)]
+    if not roles:
+        roles = [fallback if fallback in ROLE_LABELS else "developer"]
+    return roles
+
+
 def role_from_person_role(person_role, fallback="developer"):
-    return ACCOUNT_ROLES_BY_PERSON_ROLE.get(person_role, fallback if fallback in ROLE_LABELS else "developer")
+    roles = account_roles_from_person_role(person_role, fallback)
+    return fallback if fallback in roles else roles[0]
 
 
 def account_payload(row):
     keys = set(row.keys())
     person_name = row["person_name"] if "person_name" in keys else None
     person_role = row["person_role"] if "person_role" in keys else None
-    role = role_from_person_role(person_role, row["role"])
+    roles = account_roles_from_person_role(person_role, row["role"])
+    role = row["role"] if row["role"] in roles else roles[0]
     return {
         "id": row["id"],
         "username": row["username"],
         "personId": row["person_id"] if "person_id" in keys else "",
         "name": person_name or row["name"],
         "role": role,
+        "roles": roles,
         "roleLabel": role_label(role),
+        "roleLabels": [role_label(item) for item in roles],
         "mustResetPassword": bool(row["password_reset_required"]) if "password_reset_required" in keys else False,
     }
 
@@ -136,7 +171,13 @@ def stable_json(value):
 
 def current_person(conn, person_id):
     row = conn.execute("SELECT id, name, role FROM people WHERE id = ?", (person_id,)).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    person = dict(row)
+    roles = person_roles_from_value(person["role"])
+    person["role"] = roles[0]
+    person["roles"] = roles
+    return person
 
 
 def current_requirement(conn, req_id):
@@ -453,7 +494,7 @@ def save_account(data):
         if not person:
             raise ClientError("绑定的人员不存在，请先在人员管理中创建。")
         name = person["name"]
-        role = role_from_person_role(person["role"])
+        role = account_roles_from_person_role(person["role"])[0]
         existing = conn.execute("SELECT id FROM accounts WHERE username = ? AND id <> ?", (username, account_id)).fetchone()
         if existing:
             raise ClientError("这个账号名已经存在。")
@@ -517,7 +558,13 @@ def delete_account(account_id):
 
 def read_state():
     with connect() as conn:
-        people = [dict(row) for row in conn.execute("SELECT id, name, role FROM people ORDER BY name")]
+        people = []
+        for row in conn.execute("SELECT id, name, role FROM people ORDER BY name"):
+            person = dict(row)
+            roles = person_roles_from_value(person["role"])
+            person["role"] = roles[0]
+            person["roles"] = roles
+            people.append(person)
         requirements = []
         for row in conn.execute("SELECT id, title, link, status, kind, created_by AS createdBy, created_by_name AS createdByName FROM requirements ORDER BY title"):
             req = dict(row)
@@ -579,7 +626,7 @@ def write_state(state):
         for person in state.get("people") or []:
             conn.execute(
                 "INSERT OR REPLACE INTO people (id, name, role) VALUES (?, ?, ?)",
-                (person.get("id"), person.get("name", ""), person.get("role", "研发人员")),
+                (person.get("id"), person.get("name", ""), person_role_storage(person)),
             )
         for req in state.get("requirements") or []:
             conn.execute(
@@ -638,7 +685,7 @@ def upsert_people(conn, people):
             INSERT INTO people (id, name, role) VALUES (?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role
             """,
-            (person.get("id"), person.get("name", ""), person.get("role", "研发人员")),
+            (person.get("id"), person.get("name", ""), person_role_storage(person)),
         )
 
 
