@@ -223,6 +223,7 @@ const els = {
   performanceDialog: document.querySelector("#performanceDialog"),
   performanceTitle: document.querySelector("#performanceTitle"),
   performanceBody: document.querySelector("#performanceBody"),
+  exportPerformanceButton: document.querySelector("#exportPerformanceButton"),
   closePerformanceDialog: document.querySelector("#closePerformanceDialog"),
   peopleDialog: document.querySelector("#peopleDialog"),
   peopleForm: document.querySelector("#peopleForm"),
@@ -1171,9 +1172,40 @@ function excelCell(value) {
   return `<Cell><Data ss:Type="String">${excelXmlEscape(value)}</Data></Cell>`;
 }
 
+function excelSheet(name, rows) {
+  return `<Worksheet ss:Name="${excelXmlEscape(name).slice(0, 31)}"><Table>${rows.map((row) => `<Row>${row.map(excelCell).join("")}</Row>`).join("")}</Table></Worksheet>`;
+}
+
+function downloadExcelWorkbook(filename, sheets) {
+  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ ${sheets.map((sheet) => excelSheet(sheet.name, sheet.rows)).join("")}
+</Workbook>`;
+  const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function exportFilename() {
   const viewLabel = { requirement: "按需求", person: "按人员", version: "按版本" }[currentView] || "工作";
   return `工作导出-${viewLabel}-${todayKey()}.xls`;
+}
+
+function safeFilenamePart(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "")
+    .slice(0, 48);
 }
 
 function exportRowsForCurrentView() {
@@ -1248,29 +1280,13 @@ function exportCurrentWork() {
     ["状态筛选", els.statusFilter.value || "全部"],
     ["搜索", els.search.value.trim() || "无"],
   ];
-  const xmlRows = [
-    ...filterRows.map((row) => `<Row>${row.map(excelCell).join("")}</Row>`),
-    `<Row></Row>`,
-    `<Row>${headers.map(excelCell).join("")}</Row>`,
-    ...rows.map((row) => `<Row>${headers.map((header) => excelCell(row[header])).join("")}</Row>`),
-  ].join("");
-  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Worksheet ss:Name="工作导出"><Table>${xmlRows}</Table></Worksheet>
-</Workbook>`;
-  const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = exportFilename();
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  const rowsForSheet = [
+    ...filterRows,
+    [],
+    headers,
+    ...rows.map((row) => headers.map((header) => row[header])),
+  ];
+  downloadExcelWorkbook(exportFilename(), [{ name: "工作导出", rows: rowsForSheet }]);
   showToast("success", "导出完成", `已导出 ${rows.length} 行工作数据。`);
 }
 
@@ -2505,6 +2521,52 @@ function renderPerformanceComments(comments, section) {
     .join("");
 }
 
+function performanceCommentRows(comments) {
+  return comments.length
+    ? comments.map((comment) => [
+        comment.createdByName || comment.createdBy || "未知用户",
+        timestampLabel(comment.createdAt),
+        timestampLabel(comment.updatedAt),
+        comment.content,
+      ])
+    : [["暂无内容", "", "", ""]];
+}
+
+function exportPerformanceReport(person, month) {
+  const review = normalizePerformanceReview(reviewForPersonMonth(person, month) || { personName: person, month });
+  const overview = performanceOverview(person, month);
+  const overviewRows = [
+    ["姓名", person],
+    ["月份", monthLabel(parseMonth(month))],
+    ["导出时间", new Date().toLocaleString("zh-CN")],
+    [],
+    ["指标", "数值"],
+    ["参与工作", overview.entries.length],
+    ["占用工作日", `${overview.occupiedDays}/${overview.workdays}`],
+    ["饱和度", `${overview.percent}%`],
+  ];
+  const workRows = [
+    ["需求/工作标题", "所属版本", "开始日期", "结束日期", "需求链接"],
+    ...(overview.entries.length
+      ? overview.entries.map((entry) => [entry.title, entry.versionName, entry.start, entry.end, entry.link || ""])
+      : [["本月暂无工作记录", "", "", "", ""]]),
+  ];
+  const selfRows = [
+    ["填写人", review.selfSummary.updatedByName || review.selfSummary.updatedBy || ""],
+    ["更新时间", timestampLabel(review.selfSummary.updatedAt)],
+    ["自我小结", review.selfSummary.content || "本人尚未填写自我小结"],
+  ];
+  const commentHeaders = [["填写人", "创建时间", "更新时间", "内容"]];
+  downloadExcelWorkbook(`月度绩效报告-${safeFilenamePart(person)}-${month}.xls`, [
+    { name: "工作概览", rows: overviewRows },
+    { name: "本月工作列表", rows: workRows },
+    { name: "自我小结", rows: selfRows },
+    { name: "组长建议", rows: [...commentHeaders, ...performanceCommentRows(review.teamLeadComments)] },
+    { name: "领导考核", rows: [...commentHeaders, ...performanceCommentRows(review.leaderComments)] },
+  ]);
+  showToast("success", "导出完成", `已导出 ${person} ${monthLabel(parseMonth(month))} 的月度绩效报告。`);
+}
+
 function renderPerformanceDialog(person, month = selectedMonth) {
   const review = normalizePerformanceReview(reviewForPersonMonth(person, month) || { personName: person, month });
   const overview = performanceOverview(person, month);
@@ -3185,6 +3247,11 @@ async function init() {
   });
   els.closeWorkDetailDialog.addEventListener("click", () => els.workDetailDialog.close());
   els.closePerformanceDialog.addEventListener("click", () => els.performanceDialog.close());
+  els.exportPerformanceButton.addEventListener("click", () => {
+    const person = els.performanceDialog.dataset.person;
+    const month = els.performanceDialog.dataset.month;
+    if (person && month) exportPerformanceReport(person, month);
+  });
   els.performanceBody.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;

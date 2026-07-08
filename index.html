@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260708-pm-performance-days" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260708-performance-export" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -464,7 +464,10 @@
             <p class="eyebrow">月度绩效考核</p>
             <h2 id="performanceTitle">月度绩效考核</h2>
           </div>
-          <button class="icon-button" id="closePerformanceDialog" type="button" aria-label="关闭">×</button>
+          <div class="dialog-head-actions">
+            <button class="secondary-action compact" id="exportPerformanceButton" type="button">导出报告</button>
+            <button class="icon-button" id="closePerformanceDialog" type="button" aria-label="关闭">×</button>
+          </div>
         </div>
         <div id="performanceBody" class="performance-body"></div>
       </div>
@@ -553,6 +556,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260708-pm-performance-days"></script>
+    <script src="./assets/app.js?v=20260708-performance-export"></script>
   </body>
 </html>
