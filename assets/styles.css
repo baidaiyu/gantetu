@@ -1482,9 +1482,20 @@ button.calendar-admin-day:hover {
 }
 
 .config-dialog form {
+  box-sizing: border-box;
   display: grid;
   gap: 18px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 22px;
+}
+
+.config-dialog .dialog-actions {
+  background: var(--surface);
+  bottom: 0;
+  position: sticky;
+  z-index: 1;
 }
 
 .manager-dialog {
@@ -1493,7 +1504,8 @@ button.calendar-admin-day:hover {
   gap: 18px;
   max-height: calc(100vh - 40px);
   min-width: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 22px;
 }
 
@@ -1987,6 +1999,37 @@ button.calendar-admin-day:hover {
 
 .manager-actions .danger-link {
   color: var(--red);
+}
+
+.version-manager-requirements {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.version-manager-requirements li {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.version-manager-requirements .requirement-link {
+  color: var(--green);
+  text-decoration: none;
+}
+
+.version-manager-requirements .requirement-link:hover {
+  text-decoration: underline;
+}
+
+.version-manager-empty {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .assignment-section {

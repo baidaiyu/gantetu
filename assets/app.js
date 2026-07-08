@@ -46,7 +46,7 @@ const accountRoles = {
 const accountRoleByPersonRole = Object.fromEntries(Object.entries(accountRoles).map(([key, value]) => [value, key]));
 const PM_ASSIGNMENT_CONTENT = "产品经理分配";
 let currentView = "requirement";
-let requirementViewMode = "timeline";
+let requirementViewMode = "calendar";
 let versionViewMode = "calendar";
 let selectedMonth = monthKey(new Date());
 let monthTouched = false;
@@ -54,6 +54,7 @@ let currentRole = "pm";
 let currentPerson = "";
 let selectedLoadPerson = "";
 let personLoadManualSelection = false;
+let personLoadListScrollTop = 0;
 let people = [];
 let requirements = [];
 let versions = [];
@@ -144,6 +145,11 @@ const els = {
   managerResetFiltersButton: document.querySelector("#managerResetFiltersButton"),
   closeRequirementManagerDialog: document.querySelector("#closeRequirementManagerDialog"),
   managerAddRequirementButton: document.querySelector("#managerAddRequirementButton"),
+  versionManagerDialog: document.querySelector("#versionManagerDialog"),
+  versionManagerList: document.querySelector("#versionManagerList"),
+  versionManagerHint: document.querySelector("#versionManagerHint"),
+  closeVersionManagerDialog: document.querySelector("#closeVersionManagerDialog"),
+  managerAddVersionButton: document.querySelector("#managerAddVersionButton"),
   versionDialog: document.querySelector("#versionDialog"),
   versionForm: document.querySelector("#versionForm"),
   versionDialogTitle: document.querySelector("#versionDialogTitle"),
@@ -909,6 +915,16 @@ function personByName(name) {
   return people.find((person) => person.name === name);
 }
 
+function personHasRole(name, role) {
+  const person = personByName(name);
+  return Boolean(person && normalizePersonRoles(person).includes(role));
+}
+
+function accountHasRole(account, role) {
+  const roles = Array.isArray(account?.roles) ? account.roles : [account?.role].filter(Boolean);
+  return roles.includes(role);
+}
+
 function isWorkingPersonName(name) {
   const person = personByName(name);
   if (!person) return false;
@@ -963,10 +979,10 @@ function renderVersionRequirementPicker(version) {
   const selectedIds = new Set(version?.requirementIds || []);
   const availableRequirements = requirements.filter((req) => {
     const owner = requirementVersion(req.id);
-    return !owner || owner.id === version?.id;
+    return requirementCreatedByProductManager(req) && (!owner || owner.id === version?.id);
   });
   if (!availableRequirements.length) {
-    els.versionRequirementPicker.innerHTML = `<div class="people-picker-empty">暂无可加入版本的需求。已属于其他版本的需求不会在这里显示。</div>`;
+    els.versionRequirementPicker.innerHTML = `<div class="people-picker-empty">暂无可加入版本的产品需求。已属于其他版本的需求不会在这里显示。</div>`;
     return;
   }
   els.versionRequirementPicker.innerHTML = availableRequirements
@@ -1297,7 +1313,7 @@ function buildPersonRows(reqs, visibleDays) {
   const personFilter = els.personFilter.value;
   const query = els.search.value.trim().toLowerCase();
   const reqIds = reqs.map((req) => req.id);
-  const works = filteredWorkItems(reqIds);
+  const works = filteredWorkItems(reqIds).filter((work) => visibleDays.some((date) => rangeContains(work, formatDate(date))));
   const personNames = reportPeople().filter((name) => personFilter === "全部" || name === personFilter);
   return personNames
     .map((name) => {
@@ -1393,7 +1409,12 @@ function renderSummary(reqs, visibleDays) {
   });
   const total = [...personDays.values()].reduce((sum, days) => sum + days.size, 0);
   els.summary.innerHTML = [
-    [currentView === "version" ? "版本数" : "需求数", currentView === "version" ? buildVersionRows(reqs, visibleDays).length : reqs.length, "当前筛选范围", "open-requirement-manager"],
+    [
+      currentView === "version" ? "版本数" : "需求数",
+      currentView === "version" ? buildVersionRows(reqs, visibleDays).length : reqs.length,
+      "当前筛选范围",
+      currentView === "version" ? "open-version-manager" : "open-requirement-manager",
+    ],
     ["人天", total, "按人员占用工作日去重", ""],
     ["参与同事", personDays.size, `${visibleDays.length} 个工作日横轴`, ""],
   ]
@@ -1409,7 +1430,13 @@ function renderPeopleLoad() {
   els.peopleLoad.innerHTML = "";
 }
 
+function rememberPersonLoadListScroll() {
+  const listBody = els.grid.querySelector(".person-load-list-body");
+  if (listBody) personLoadListScrollTop = listBody.scrollTop;
+}
+
 function renderPersonLoadView(reqs) {
+  rememberPersonLoadListScroll();
   const monthDate = parseMonth(selectedMonth);
   const start = startOfMonth(monthDate);
   const end = endOfMonth(monthDate);
@@ -1436,6 +1463,17 @@ function renderPersonLoadView(reqs) {
         .join("")
     : `<div class="empty-state people-empty">当前筛选下暂无人员工作安排。</div>`;
   els.grid.innerHTML = `<div class="person-load-board"><section class="person-load-list">${leftHeader}<div class="person-load-list-body">${leftRows}</div></section><section class="person-load-detail">${renderPersonLoadDetail(selectedLoadPerson, visibleDays)}</section></div>`;
+  const nextListBody = els.grid.querySelector(".person-load-list-body");
+  if (nextListBody) {
+    nextListBody.scrollTop = personLoadListScrollTop;
+    nextListBody.addEventListener(
+      "scroll",
+      () => {
+        personLoadListScrollTop = nextListBody.scrollTop;
+      },
+      { passive: true },
+    );
+  }
 }
 
 function renderPersonLoadDetail(person, visibleDays) {
@@ -1832,6 +1870,47 @@ function openRequirementManagerDialog() {
   els.requirementManagerDialog.showModal();
 }
 
+function visibleManagedVersions() {
+  const reqIds = new Set(filteredRequirements().map((req) => req.id));
+  return versions.filter((version) => version.requirementIds.some((id) => reqIds.has(id)));
+}
+
+function renderVersionManager() {
+  const visibleVersions = visibleManagedVersions();
+  els.versionManagerHint.textContent = `当前筛选范围 ${visibleVersions.length} 个`;
+  els.managerAddVersionButton.hidden = !canManageVersion();
+  if (!visibleVersions.length) {
+    els.versionManagerList.innerHTML = `<div class="empty-state people-empty">没有匹配的版本。</div>`;
+    return;
+  }
+  els.versionManagerList.innerHTML = visibleVersions
+    .map((version) => {
+      const versionReqs = version.requirementIds.map(requirementById).filter(Boolean);
+      const peopleNames = visibleWorkerNames(versionReqs.flatMap((req) => req.people));
+      const requirementList = versionReqs.length
+        ? `<ul class="version-manager-requirements">${versionReqs
+            .map((req) => `<li>${renderRequirementTitle(req.title, req.link)}</li>`)
+            .join("")}</ul>`
+        : `<div class="version-manager-empty">暂无需求</div>`;
+      const actions = canManageVersion()
+        ? `<button type="button" data-action="manager-edit-version" data-id="${version.id}">编辑</button><button class="danger-link" type="button" data-action="manager-delete-version" data-id="${version.id}">删除</button>`
+        : "";
+      return `<article class="requirement-manager-item"><div class="manager-item-main"><div class="task-title">${escapeHtml(version.name)}</div><div class="task-meta">${escapeHtml(version.start)} 至 ${escapeHtml(version.end)} · ${versionReqs.length} 个需求</div>${requirementList}<div class="row-tags"><span class="person-chip">${escapeHtml(peopleNames.join("、") || "未分配")}</span></div></div><div class="row-actions manager-actions">${actions}</div></article>`;
+    })
+    .join("");
+}
+
+function openVersionManagerDialog() {
+  renderVersionManager();
+  els.versionManagerDialog.showModal();
+}
+
+function deleteVersionById(id) {
+  queueDelete("versions", id);
+  versions = versions.filter((version) => version.id !== id);
+  saveState();
+}
+
 function deleteRequirementById(id) {
   queueDelete("requirements", id);
   requirements = requirements.filter((req) => req.id !== id);
@@ -1853,6 +1932,21 @@ function handleRequirementManagerClick(event) {
     deleteRequirementById(id);
     render();
     renderRequirementManager();
+  }
+}
+
+function handleVersionManagerClick(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const id = button.dataset.id;
+  if (button.dataset.action === "manager-edit-version") {
+    els.versionManagerDialog.close();
+    openVersionDialog(versionById(id));
+  }
+  if (button.dataset.action === "manager-delete-version" && confirm("确认删除这个版本吗？需求本身不会被删除。")) {
+    deleteVersionById(id);
+    render();
+    renderVersionManager();
   }
 }
 
@@ -1911,6 +2005,14 @@ function assignmentRows() {
 
 function requirementCreatedByCurrentUser(req) {
   return Boolean(req && currentUser && (req.createdBy === currentUser.username || req.createdByName === currentUser.name));
+}
+
+function requirementCreatedByProductManager(req) {
+  if (!req || req.kind === "other") return false;
+  if (currentUser && requirementCreatedByCurrentUser(req) && currentUserRoles().includes("pm")) return true;
+  if (req.createdByName && personHasRole(req.createdByName, "产品经理")) return true;
+  const account = accounts.find((item) => item.username === req.createdBy || item.name === req.createdByName);
+  return accountHasRole(account, "pm");
 }
 
 function workDialogRequirements() {
@@ -2502,6 +2604,7 @@ function handleGridClick(event) {
     render();
   }
   if (button.dataset.action === "select-load-person") {
+    rememberPersonLoadListScroll();
     personLoadManualSelection = true;
     selectedLoadPerson = id;
     render();
@@ -2629,8 +2732,10 @@ async function init() {
   els.closePendingWorkDialog.addEventListener("click", () => els.pendingWorkDialog.close());
   els.pendingWorkList.addEventListener("click", handlePendingWorkClick);
   els.summary.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action='open-requirement-manager']");
-    if (button) openRequirementManagerDialog();
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "open-requirement-manager") openRequirementManagerDialog();
+    if (button.dataset.action === "open-version-manager") openVersionManagerDialog();
   });
   els.personFilter.addEventListener("input", render);
   els.statusFilter.addEventListener("input", render);
@@ -2709,6 +2814,12 @@ async function init() {
   });
   els.closeRequirementManagerDialog.addEventListener("click", () => els.requirementManagerDialog.close());
   els.requirementManagerList.addEventListener("click", handleRequirementManagerClick);
+  els.closeVersionManagerDialog.addEventListener("click", () => els.versionManagerDialog.close());
+  els.versionManagerList.addEventListener("click", handleVersionManagerClick);
+  els.managerAddVersionButton.addEventListener("click", () => {
+    els.versionManagerDialog.close();
+    openVersionDialog();
+  });
   [els.managerSearchInput, els.managerStatusFilter, els.managerPersonFilter, els.managerVersionFilter, els.managerMineOnlyInput].forEach((control) => {
     control.addEventListener("input", () => {
       saveManagerFilters();
@@ -2808,11 +2919,10 @@ async function init() {
     render();
   });
   els.deleteVersionButton.addEventListener("click", () => {
-    queueDelete("versions", els.versionId.value);
-    versions = versions.filter((version) => version.id !== els.versionId.value);
-    saveState();
+    deleteVersionById(els.versionId.value);
     els.versionDialog.close();
     render();
+    if (els.versionManagerDialog.open) renderVersionManager();
   });
   els.deleteWorkButton.addEventListener("click", () => {
     const work = workItems.find((item) => item.id === els.workId.value);

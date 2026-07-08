@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>需求投入日历视图</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=20260611-pm-other-work" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260708-version-requirements" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -231,6 +231,23 @@
           <button class="secondary-action compact" id="managerResetFiltersButton" type="button">重置</button>
         </div>
         <div class="requirement-manager-list" id="requirementManagerList"></div>
+      </div>
+    </dialog>
+
+    <dialog class="config-dialog" id="versionManagerDialog">
+      <div class="manager-dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">版本管理</p>
+            <h2>版本列表</h2>
+          </div>
+          <button class="icon-button" id="closeVersionManagerDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="section-head">
+          <h3 id="versionManagerHint">当前筛选范围</h3>
+          <button class="primary-action compact" id="managerAddVersionButton" type="button">新增版本</button>
+        </div>
+        <div class="requirement-manager-list" id="versionManagerList"></div>
       </div>
     </dialog>
 
@@ -523,6 +540,6 @@
     </dialog>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-    <script src="./assets/app.js?v=20260611-pm-other-work"></script>
+    <script src="./assets/app.js?v=20260708-version-requirements"></script>
   </body>
 </html>
