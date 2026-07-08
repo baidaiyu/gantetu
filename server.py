@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -18,11 +20,20 @@ DB_PATH = DATA_DIR / "app.sqlite"
 JSON_PATH = DATA_DIR / "db.json"
 BACKUP_DIR = DATA_DIR / "safety-backups"
 WRITE_LOG_DIR = DATA_DIR / "write-logs"
+IMAGE_DIR = DATA_DIR / "work-images"
+IMAGE_ROUTE_PREFIX = "/api/work-image/"
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "4174"))
 SESSION_MAX_AGE = 60 * 60 * 24 * 14
 DEFAULT_ACCOUNT_PASSWORD = os.environ.get("DEFAULT_ACCOUNT_PASSWORD", "123456")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", DEFAULT_ACCOUNT_PASSWORD)
+IMAGE_MIME_EXTENSIONS = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 
 ROLE_LABELS = {
     "admin": "管理员",
@@ -108,6 +119,40 @@ def account_roles_from_person_role(person_role, fallback="developer"):
 def role_from_person_role(person_role, fallback="developer"):
     roles = account_roles_from_person_role(person_role, fallback)
     return fallback if fallback in roles else roles[0]
+
+
+def store_inline_work_image(value):
+    if not isinstance(value, str) or not value.startswith("data:image/"):
+        return value
+    header, _, payload = value.partition(",")
+    if ";base64" not in header or not payload:
+        return value
+    mime_type = header[5:].split(";", 1)[0].lower()
+    extension = IMAGE_MIME_EXTENSIONS.get(mime_type, ".img")
+    try:
+        raw = base64.b64decode(payload, validate=True)
+    except Exception:
+        return value
+    digest = hashlib.sha256(raw).hexdigest()
+    filename = f"{digest}{extension}"
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    target = IMAGE_DIR / filename
+    if not target.exists():
+        target.write_bytes(raw)
+    return f"{IMAGE_ROUTE_PREFIX}{filename}"
+
+
+def normalize_work_images(images):
+    if not isinstance(images, list):
+        return []
+    return [store_inline_work_image(image) for image in images if isinstance(image, str) and image]
+
+
+def parse_work_images(value):
+    try:
+        return normalize_work_images(json.loads(value or "[]"))
+    except Exception:
+        return []
 
 
 def account_payload(row):
@@ -408,6 +453,7 @@ def init_db():
             if person_id:
                 conn.execute("UPDATE accounts SET person_id = ? WHERE id = ?", (person_id, account["id"]))
     migrate_json_if_needed()
+    migrate_inline_work_images()
 
 
 def has_rows(conn):
@@ -428,6 +474,27 @@ def migrate_json_if_needed():
     if not has_state_data(state):
         return
     write_state(state)
+
+
+def migrate_inline_work_images():
+    changed = False
+    with connect() as conn:
+        for row in conn.execute("SELECT id, images FROM work_items").fetchall():
+            try:
+                images = json.loads(row["images"] or "[]")
+            except Exception:
+                images = []
+            normalized = normalize_work_images(images)
+            if normalized != images:
+                conn.execute(
+                    "UPDATE work_items SET images = ? WHERE id = ?",
+                    (json.dumps(normalized, ensure_ascii=False), row["id"]),
+                )
+                changed = True
+        if changed:
+            conn.commit()
+    if changed:
+        mirror_json()
 
 
 def has_state_data(state):
@@ -604,7 +671,7 @@ def read_state():
             ]
             versions.append(version)
         work_items = [
-            {**dict(row), "images": json.loads(row["images"] or "[]")}
+            {**dict(row), "images": parse_work_images(row["images"])}
             for row in conn.execute(
                 "SELECT id, requirement_id AS requirementId, person, start, end, content, images FROM work_items ORDER BY start, person"
             )
@@ -685,7 +752,7 @@ def write_state(state):
                     item.get("start"),
                     item.get("end"),
                     item.get("content", ""),
-                    json.dumps(item.get("images") or [], ensure_ascii=False),
+                    json.dumps(normalize_work_images(item.get("images") or []), ensure_ascii=False),
                 ),
             )
         for date in state.get("holidays") or []:
@@ -782,7 +849,7 @@ def upsert_work_items(conn, work_items):
                 item.get("start"),
                 item.get("end"),
                 item.get("content", ""),
-                json.dumps(item.get("images") or [], ensure_ascii=False),
+                json.dumps(normalize_work_images(item.get("images") or []), ensure_ascii=False),
             ),
         )
 
@@ -919,6 +986,29 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith(IMAGE_ROUTE_PREFIX):
+            try:
+                self.require_user()
+            except ClientError as error:
+                self.send_json(error.status, {"error": str(error)})
+                return
+            filename = parsed.path.removeprefix(IMAGE_ROUTE_PREFIX)
+            safe_filename = Path(filename).name
+            if filename != safe_filename:
+                self.send_error(404, "File not found")
+                return
+            path = IMAGE_DIR / safe_filename
+            if not path.exists() or not path.is_file():
+                self.send_error(404, "File not found")
+                return
+            mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", mime_type)
+            self.send_header("Content-Length", str(path.stat().st_size))
+            self.end_headers()
+            with path.open("rb") as file:
+                shutil.copyfileobj(file, self.wfile)
+            return
         if parsed.path == "/api/session":
             user = self.current_user()
             if not user:

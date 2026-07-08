@@ -47,6 +47,11 @@ const accountRoles = {
 };
 const accountRoleByPersonRole = Object.fromEntries(Object.entries(accountRoles).map(([key, value]) => [value, key]));
 const PM_ASSIGNMENT_CONTENT = "产品经理分配";
+const WORK_IMAGE_MAX_COUNT = 6;
+const WORK_IMAGE_MAX_INPUT_BYTES = 12 * 1024 * 1024;
+const WORK_IMAGE_MAX_OUTPUT_BYTES = 700 * 1024;
+const WORK_IMAGE_MAX_DIMENSION = 1600;
+const WORK_IMAGE_JPEG_QUALITY = 0.78;
 let currentView = "requirement";
 let requirementViewMode = "calendar";
 let versionViewMode = "calendar";
@@ -1082,13 +1087,65 @@ function renderWorkImages() {
   renderWorkImageList(els.otherWorkImageList, otherWorkImageDraft);
 }
 
-function readImageFile(file) {
+function readBlobAsDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("图片压缩失败。"));
+    }, type, quality);
+  });
+}
+
+async function loadImageSource(file) {
+  if ("createImageBitmap" in window) return createImageBitmap(file);
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function readImageFile(file) {
+  if (file.size > WORK_IMAGE_MAX_INPUT_BYTES) {
+    throw new Error("单张图片过大，请先压缩或裁剪后再粘贴。");
+  }
+  const image = await loadImageSource(file);
+  const sourceWidth = image.width || image.naturalWidth || 1;
+  const sourceHeight = image.height || image.naturalHeight || 1;
+  const ratio = Math.min(1, WORK_IMAGE_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * ratio));
+  const height = Math.max(1, Math.round(sourceHeight * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  if (typeof image.close === "function") image.close();
+  let blob = await canvasToBlob(canvas, "image/jpeg", WORK_IMAGE_JPEG_QUALITY);
+  if (blob.size > WORK_IMAGE_MAX_OUTPUT_BYTES) {
+    blob = await canvasToBlob(canvas, "image/jpeg", 0.62);
+  }
+  if (blob.size > WORK_IMAGE_MAX_OUTPUT_BYTES * 1.4) {
+    throw new Error("图片压缩后仍然过大，请裁剪后再粘贴。");
+  }
+  return readBlobAsDataUrl(blob);
 }
 
 async function appendPastedImages(event, target) {
@@ -1098,10 +1155,23 @@ async function appendPastedImages(event, target) {
     .filter(Boolean);
   if (!files.length) return;
   event.preventDefault();
-  const images = await Promise.all(files.map(readImageFile));
-  if (target === "other") otherWorkImageDraft.push(...images);
-  else workImageDraft.push(...images);
-  renderWorkImages();
+  const draft = target === "other" ? otherWorkImageDraft : workImageDraft;
+  const remaining = WORK_IMAGE_MAX_COUNT - draft.length;
+  if (remaining <= 0) {
+    showToast("error", "图片数量已达上限", `每条工作最多添加 ${WORK_IMAGE_MAX_COUNT} 张图片。`);
+    return;
+  }
+  const selectedFiles = files.slice(0, remaining);
+  if (selectedFiles.length < files.length) {
+    showToast("error", "部分图片未添加", `每条工作最多添加 ${WORK_IMAGE_MAX_COUNT} 张图片。`);
+  }
+  try {
+    const images = await Promise.all(selectedFiles.map(readImageFile));
+    draft.push(...images);
+    renderWorkImages();
+  } catch (error) {
+    showToast("error", "图片添加失败", error.message || "请压缩图片后再粘贴。");
+  }
 }
 
 function removeWorkImage(target, index) {

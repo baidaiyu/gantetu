@@ -10,6 +10,7 @@ node_modules/
 data/safety-backups/
 data/write-logs/
 data/emergency-backups/
+data/work-images/
 data/*.sqlite
 data/*.sqlite-*
 data/*.db
