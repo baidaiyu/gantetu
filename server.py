@@ -39,6 +39,7 @@ EMPTY_STATE = {
     "requirements": [],
     "versions": [],
     "workItems": [],
+    "performanceReviews": [],
     "holidays": [],
     "workdays": [],
 }
@@ -218,6 +219,11 @@ def current_work_item(conn, item_id):
     return {**dict(row), "images": json.loads(row["images"] or "[]")} if row else None
 
 
+def current_performance_review(conn, review_id):
+    row = conn.execute("SELECT id, data FROM performance_reviews WHERE id = ?", (review_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
 def check_patch_conflicts(conn, patch):
     base = patch.get("base") or {}
     upserts = patch.get("upserts") or {}
@@ -226,6 +232,7 @@ def check_patch_conflicts(conn, patch):
         ("requirements", current_requirement, "需求"),
         ("versions", current_version, "版本"),
         ("workItems", current_work_item, "工作记录"),
+        ("performanceReviews", current_performance_review, "绩效记录"),
     )
     for key, getter, label in checks:
         base_items = base.get(key) or {}
@@ -330,6 +337,14 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS workdays (
               date TEXT PRIMARY KEY
+            );
+
+            CREATE TABLE IF NOT EXISTS performance_reviews (
+              id TEXT PRIMARY KEY,
+              person_name TEXT NOT NULL,
+              month TEXT NOT NULL,
+              data TEXT NOT NULL,
+              UNIQUE(person_name, month)
             );
 
             CREATE TABLE IF NOT EXISTS accounts (
@@ -595,11 +610,13 @@ def read_state():
         ]
         holidays = [row["date"] for row in conn.execute("SELECT date FROM holidays ORDER BY date")]
         workdays = [row["date"] for row in conn.execute("SELECT date FROM workdays ORDER BY date")]
+        performance_reviews = [json.loads(row["data"]) for row in conn.execute("SELECT data FROM performance_reviews ORDER BY month DESC, person_name")]
     return {
         "people": people,
         "requirements": requirements,
         "versions": versions,
         "workItems": work_items,
+        "performanceReviews": performance_reviews,
         "holidays": holidays,
         "workdays": workdays,
     }
@@ -619,6 +636,7 @@ def write_state(state):
             DELETE FROM versions;
             DELETE FROM requirements;
             DELETE FROM people;
+            DELETE FROM performance_reviews;
             DELETE FROM holidays;
             DELETE FROM workdays;
             """
@@ -673,6 +691,7 @@ def write_state(state):
             conn.execute("INSERT OR REPLACE INTO holidays (date) VALUES (?)", (date,))
         for date in state.get("workdays") or []:
             conn.execute("INSERT OR REPLACE INTO workdays (date) VALUES (?)", (date,))
+        upsert_performance_reviews(conn, state.get("performanceReviews") or [])
         finish_checked_transaction(conn, before_counts)
     mirror_json()
     return read_state()
@@ -767,6 +786,26 @@ def upsert_work_items(conn, work_items):
         )
 
 
+def upsert_performance_reviews(conn, reviews):
+    for review in reviews or []:
+        review_id = review.get("id")
+        conn.execute(
+            """
+            INSERT INTO performance_reviews (id, person_name, month, data) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              person_name = excluded.person_name,
+              month = excluded.month,
+              data = excluded.data
+            """,
+            (
+                review_id,
+                review.get("personName", ""),
+                review.get("month", ""),
+                json.dumps(review, ensure_ascii=False),
+            ),
+        )
+
+
 def merge_state(state):
     state = state if isinstance(state, dict) else {}
     snapshot_data("merge-state")
@@ -785,6 +824,9 @@ def merge_state(state):
         for item in state.get("workItems") or []:
             if not conn.execute("SELECT 1 FROM work_items WHERE id = ?", (item.get("id"),)).fetchone():
                 upsert_work_items(conn, [item])
+        for review in state.get("performanceReviews") or []:
+            if not conn.execute("SELECT 1 FROM performance_reviews WHERE id = ?", (review.get("id"),)).fetchone():
+                upsert_performance_reviews(conn, [review])
         for date in state.get("holidays") or []:
             conn.execute("INSERT OR REPLACE INTO holidays (date) VALUES (?)", (date,))
         for date in state.get("workdays") or []:
@@ -799,7 +841,7 @@ def apply_patch_state(patch):
     upserts = patch.get("upserts") or {}
     deletes = patch.get("deletes") or {}
     calendar = patch.get("calendar") or {}
-    delete_count = sum(len(deletes.get(key) or []) for key in ("people", "requirements", "versions", "workItems"))
+    delete_count = sum(len(deletes.get(key) or []) for key in ("people", "requirements", "versions", "workItems", "performanceReviews"))
     if delete_count > 20:
         raise ClientError("本次删除数量异常，服务器已拦截。请刷新页面确认数据后再操作。")
     snapshot_data("patch-state")
@@ -809,6 +851,8 @@ def apply_patch_state(patch):
         check_patch_conflicts(conn, patch)
         for item_id in deletes.get("workItems") or []:
             conn.execute("DELETE FROM work_items WHERE id = ?", (item_id,))
+        for review_id in deletes.get("performanceReviews") or []:
+            conn.execute("DELETE FROM performance_reviews WHERE id = ?", (review_id,))
         for version_id in deletes.get("versions") or []:
             conn.execute("DELETE FROM versions WHERE id = ?", (version_id,))
         for req_id in deletes.get("requirements") or []:
@@ -819,6 +863,7 @@ def apply_patch_state(patch):
         upsert_requirements(conn, upserts.get("requirements") or [])
         upsert_versions(conn, upserts.get("versions") or [])
         upsert_work_items(conn, upserts.get("workItems") or [])
+        upsert_performance_reviews(conn, upserts.get("performanceReviews") or [])
 
         for date in calendar.get("removeHolidays") or []:
             conn.execute("DELETE FROM holidays WHERE date = ?", (date,))

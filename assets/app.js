@@ -7,6 +7,7 @@ const defaultState = {
   requirements: [],
   versions: [],
   workItems: [],
+  performanceReviews: [],
   holidays: [],
   workdays: [],
 };
@@ -59,6 +60,7 @@ let people = [];
 let requirements = [];
 let versions = [];
 let workItems = [];
+let performanceReviews = [];
 let holidays = new Set();
 let workdays = new Set();
 let draftHolidays = new Set();
@@ -76,6 +78,7 @@ let pendingDeletes = {
   requirements: new Set(),
   versions: new Set(),
   workItems: new Set(),
+  performanceReviews: new Set(),
 };
 const expandedVersions = new Set();
 const expandedRequirements = new Set();
@@ -217,6 +220,10 @@ const els = {
   workDetailTitle: document.querySelector("#workDetailTitle"),
   workDetailBody: document.querySelector("#workDetailBody"),
   closeWorkDetailDialog: document.querySelector("#closeWorkDetailDialog"),
+  performanceDialog: document.querySelector("#performanceDialog"),
+  performanceTitle: document.querySelector("#performanceTitle"),
+  performanceBody: document.querySelector("#performanceBody"),
+  closePerformanceDialog: document.querySelector("#closePerformanceDialog"),
   peopleDialog: document.querySelector("#peopleDialog"),
   peopleForm: document.querySelector("#peopleForm"),
   peopleList: document.querySelector("#peopleList"),
@@ -450,6 +457,33 @@ function normalizeWork(input) {
   };
 }
 
+function normalizePerformanceComment(input = {}) {
+  return {
+    id: input.id || createId("comment"),
+    content: input.content || "",
+    createdBy: input.createdBy || "",
+    createdByName: input.createdByName || "",
+    createdAt: input.createdAt || todayKey(),
+    updatedAt: input.updatedAt || input.createdAt || todayKey(),
+  };
+}
+
+function normalizePerformanceReview(input = {}) {
+  return {
+    id: input.id || createId("perf"),
+    personName: input.personName || "",
+    month: input.month || selectedMonth,
+    selfSummary: {
+      content: input.selfSummary?.content || "",
+      updatedBy: input.selfSummary?.updatedBy || "",
+      updatedByName: input.selfSummary?.updatedByName || "",
+      updatedAt: input.selfSummary?.updatedAt || "",
+    },
+    teamLeadComments: Array.isArray(input.teamLeadComments) ? input.teamLeadComments.map(normalizePerformanceComment) : [],
+    leaderComments: Array.isArray(input.leaderComments) ? input.leaderComments.map(normalizePerformanceComment) : [],
+  };
+}
+
 function migrateOldState(oldState) {
   const reqMap = new Map();
   const migratedRequirements = [];
@@ -609,6 +643,7 @@ function currentStatePayload() {
     requirements,
     versions,
     workItems,
+    performanceReviews,
     holidays: [...holidays].sort(),
     workdays: [...workdays].sort(),
   };
@@ -624,6 +659,7 @@ function applyState(state) {
   requirements = nextState.requirements.map(normalizeRequirement);
   versions = nextState.versions.map(normalizeVersion);
   workItems = nextState.workItems.map(normalizeWork);
+  performanceReviews = nextState.performanceReviews.map(normalizePerformanceReview);
   holidays = new Set(nextState.holidays || []);
   workdays = new Set(nextState.workdays || []);
   ensurePeopleFromExistingData();
@@ -677,6 +713,7 @@ function clearPendingDeletes() {
     requirements: new Set(),
     versions: new Set(),
     workItems: new Set(),
+    performanceReviews: new Set(),
   };
 }
 
@@ -698,6 +735,7 @@ function buildStatePatch(previousState, currentState) {
     requirements: changedItems(previous.requirements, current.requirements),
     versions: changedItems(previous.versions, current.versions),
     workItems: changedItems(previous.workItems, current.workItems),
+    performanceReviews: changedItems(previous.performanceReviews, current.performanceReviews),
   };
   return {
     upserts,
@@ -706,6 +744,7 @@ function buildStatePatch(previousState, currentState) {
       requirements: baseItems(previous.requirements, upserts.requirements),
       versions: baseItems(previous.versions, upserts.versions),
       workItems: baseItems(previous.workItems, upserts.workItems),
+      performanceReviews: baseItems(previous.performanceReviews, upserts.performanceReviews),
     },
     deletes: queuedDeletes(),
     calendar: {
@@ -1486,7 +1525,7 @@ function renderPersonLoadDetail(person, visibleDays) {
   const works = workItems.filter((work) => work.person === person);
   const occupiedDays = visibleDays.filter((date) => works.some((work) => rangeContains(work, formatDate(date)))).length;
   const percent = visibleDays.length ? Math.round((occupiedDays / visibleDays.length) * 100) : 0;
-  return `<section class="month-panel person-calendar-panel"><div class="month-title"><div><strong>${escapeHtml(person)}</strong><span>${monthLabel(start)} · 已占用 ${occupiedDays}/${visibleDays.length} 天 · ${percent}%</span></div></div><div class="month-grid">${calendarWeekdays.map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}${Array.from({ length: leading }, () => `<div class="calendar-day calendar-pad"></div>`).join("")}${days
+  return `<section class="month-panel person-calendar-panel"><div class="month-title"><div><strong>${escapeHtml(person)}</strong><button class="secondary-action compact performance-entry-button" type="button" data-action="open-performance-review" data-id="${escapeHtml(person)}">月度绩效考核</button><span>${monthLabel(start)} · 已占用 ${occupiedDays}/${visibleDays.length} 天 · ${percent}%</span></div></div><div class="month-grid">${calendarWeekdays.map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}${Array.from({ length: leading }, () => `<div class="calendar-day calendar-pad"></div>`).join("")}${days
     .map((date) => {
       const key = formatDate(date);
       const dayWorks = isHiddenDate(date) ? [] : works.filter((work) => rangeContains(work, key));
@@ -2310,6 +2349,235 @@ function showPersonDayDetail(person, dateKey) {
   openWorkDetailDialog(`${person} · ${dateKey}`, works);
 }
 
+function timestampLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function reviewForPersonMonth(person, month) {
+  return performanceReviews.find((review) => review.personName === person && review.month === month);
+}
+
+function ensureReviewForPersonMonth(person, month) {
+  let review = reviewForPersonMonth(person, month);
+  if (!review) {
+    review = normalizePerformanceReview({ personName: person, month });
+    performanceReviews.push(review);
+  }
+  return review;
+}
+
+function isCurrentUserPerson(person) {
+  return Boolean(currentUser && currentUser.name === person);
+}
+
+function canEditPerformanceComment(comment) {
+  return Boolean(currentUser && (comment.createdBy === currentUser.username || comment.createdByName === currentUser.name));
+}
+
+function monthVisibleDays(month) {
+  const monthDate = parseMonth(month);
+  return eachVisibleDay(startOfMonth(monthDate), endOfMonth(monthDate));
+}
+
+function dateRangeOverlapsDays(start, end, visibleDays) {
+  return visibleDays.some((date) => rangeContains({ start, end }, formatDate(date)));
+}
+
+function requirementTouchesMonth(req, visibleDays) {
+  const version = requirementVersion(req.id);
+  if (version && dateRangeOverlapsDays(version.start, version.end, visibleDays)) return true;
+  return workItems.some((work) => work.requirementId === req.id && workOverlapsVisibleDays(work, visibleDays));
+}
+
+function performanceEntries(person, month) {
+  const visibleDays = monthVisibleDays(month);
+  const entries = workItems
+    .filter((work) => work.person === person && workOverlapsVisibleDays(work, visibleDays))
+    .map((work) => {
+      const req = requirementById(work.requirementId);
+      const version = req ? requirementVersion(req.id) : null;
+      return {
+        type: "work",
+        id: work.id,
+        requirementId: work.requirementId,
+        title: req?.title || "未知需求",
+        link: req?.link || "",
+        versionName: version?.name || "无目标版本",
+        start: work.start,
+        end: work.end,
+        status: req?.status || "未开始",
+      };
+    });
+  if (personHasRole(person, "产品经理")) {
+    const existingReqIds = new Set(entries.map((entry) => entry.requirementId));
+    requirements
+      .filter((req) => req.createdByName === person && !existingReqIds.has(req.id) && requirementTouchesMonth(req, visibleDays))
+      .forEach((req) => {
+        const version = requirementVersion(req.id);
+        const relatedWorks = workItems.filter((work) => work.requirementId === req.id && workOverlapsVisibleDays(work, visibleDays));
+        entries.push({
+          type: "requirement",
+          id: req.id,
+          requirementId: req.id,
+          title: req.title,
+          link: req.link,
+          versionName: version?.name || "无目标版本",
+          start: version?.start || relatedWorks[0]?.start || month,
+          end: version?.end || relatedWorks[0]?.end || month,
+          status: req.status,
+        });
+      });
+  }
+  return entries.sort((a, b) => `${a.start}-${a.title}`.localeCompare(`${b.start}-${b.title}`, "zh-CN"));
+}
+
+function performanceOverview(person, month) {
+  const visibleDays = monthVisibleDays(month);
+  const entries = performanceEntries(person, month);
+  const occupiedDays = new Set();
+  workItems
+    .filter((work) => work.person === person && workOverlapsVisibleDays(work, visibleDays))
+    .forEach((work) => {
+      visibleDays.forEach((date) => {
+        const key = formatDate(date);
+        if (rangeContains(work, key)) occupiedDays.add(key);
+      });
+    });
+  const percent = visibleDays.length ? Math.round((occupiedDays.size / visibleDays.length) * 100) : 0;
+  return { entries, occupiedDays: occupiedDays.size, workdays: visibleDays.length, percent };
+}
+
+function renderPerformanceComments(comments, section) {
+  if (!comments.length) return `<div class="performance-empty">暂无内容。</div>`;
+  return comments
+    .map((comment) => {
+      const actions = canEditPerformanceComment(comment)
+        ? `<div class="performance-comment-actions"><button type="button" data-action="edit-performance-comment" data-section="${section}" data-id="${comment.id}">编辑</button><button class="danger-link" type="button" data-action="delete-performance-comment" data-section="${section}" data-id="${comment.id}">删除</button></div>`
+        : "";
+      return `<article class="performance-comment"><div class="performance-comment-head"><strong>${escapeHtml(comment.createdByName || comment.createdBy || "未知用户")}</strong><span>${escapeHtml(timestampLabel(comment.updatedAt || comment.createdAt))}</span></div><p>${escapeHtml(comment.content).replaceAll("\n", "<br>")}</p>${actions}</article>`;
+    })
+    .join("");
+}
+
+function renderPerformanceDialog(person, month = selectedMonth) {
+  const review = normalizePerformanceReview(reviewForPersonMonth(person, month) || { personName: person, month });
+  const overview = performanceOverview(person, month);
+  const selfEditable = isCurrentUserPerson(person);
+  const leaderEditable = currentRole === "leader";
+  els.performanceDialog.dataset.person = person;
+  els.performanceDialog.dataset.month = month;
+  els.performanceTitle.textContent = `${person} · ${monthLabel(parseMonth(month))}`;
+  const workList = overview.entries.length
+    ? overview.entries
+        .map((entry) => {
+          const title = entry.type === "work"
+            ? `<button class="performance-work-link" type="button" data-action="performance-work-detail" data-id="${escapeHtml(entry.id)}">${escapeHtml(entry.title)}</button>`
+            : renderRequirementTitle(entry.title, entry.link);
+          return `<article class="performance-work-item"><div><strong>${title}</strong><span>${escapeHtml(entry.versionName)} · ${escapeHtml(entry.start)} 至 ${escapeHtml(entry.end)}</span></div></article>`;
+        })
+        .join("")
+    : `<div class="performance-empty">本月暂无工作记录。</div>`;
+  els.performanceBody.innerHTML = `<section class="performance-overview"><div><b>${overview.entries.length}</b><span>参与工作</span></div><div><b>${overview.occupiedDays}/${overview.workdays}</b><span>占用工作日</span></div><div><b>${overview.percent}%</b><span>饱和度</span></div></section>
+    <section class="performance-section"><h3>本月工作列表</h3><div class="performance-work-list">${workList}</div></section>
+    <section class="performance-section"><h3>自我小结</h3><textarea id="performanceSelfInput" ${selfEditable ? "" : "readonly"} placeholder="${selfEditable ? "填写本月自我小结" : "本人尚未填写自我小结"}">${escapeHtml(review.selfSummary.content)}</textarea><div class="performance-section-actions">${selfEditable ? `<button class="primary-action compact" type="button" data-action="save-performance-self">保存自我小结</button>` : `<span class="field-hint">只有本人可以编辑。</span>`}</div></section>
+    <section class="performance-section"><h3>组长考核建议</h3><div class="performance-comment-list">${renderPerformanceComments(review.teamLeadComments, "teamLeadComments")}</div><textarea id="performanceTeamLeadInput" placeholder="填写组长考核建议"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="teamLeadComments">提交建议</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="teamLeadComments" hidden>取消编辑</button></div></section>
+    <section class="performance-section"><h3>领导考核区</h3><div class="performance-comment-list">${renderPerformanceComments(review.leaderComments, "leaderComments")}</div>${leaderEditable ? `<textarea id="performanceLeaderInput" placeholder="填写领导考核"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="leaderComments">提交考核</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="leaderComments" hidden>取消编辑</button></div>` : `<div class="performance-empty">只有当前角色为领导时可以填写领导考核。</div>`}</section>`;
+}
+
+function openPerformanceDialog(person, month = selectedMonth) {
+  renderPerformanceDialog(person, month);
+  els.performanceDialog.showModal();
+}
+
+function savePerformanceSelf() {
+  const person = els.performanceDialog.dataset.person;
+  const month = els.performanceDialog.dataset.month;
+  if (!isCurrentUserPerson(person)) return;
+  const review = ensureReviewForPersonMonth(person, month);
+  review.selfSummary = {
+    content: document.querySelector("#performanceSelfInput").value.trim(),
+    updatedBy: currentUser?.username || "",
+    updatedByName: currentUser?.name || "",
+    updatedAt: new Date().toISOString(),
+  };
+  saveState();
+  renderPerformanceDialog(person, month);
+}
+
+function savePerformanceComment(section) {
+  const person = els.performanceDialog.dataset.person;
+  const month = els.performanceDialog.dataset.month;
+  if (section === "leaderComments" && currentRole !== "leader") return;
+  const input = document.querySelector(section === "leaderComments" ? "#performanceLeaderInput" : "#performanceTeamLeadInput");
+  const content = input?.value.trim() || "";
+  if (!content) return;
+  const review = ensureReviewForPersonMonth(person, month);
+  const comments = review[section];
+  const editId = input.dataset.editId;
+  const now = new Date().toISOString();
+  if (editId) {
+    const comment = comments.find((item) => item.id === editId);
+    if (!comment || !canEditPerformanceComment(comment)) return;
+    comment.content = content;
+    comment.updatedAt = now;
+  } else {
+    comments.push(
+      normalizePerformanceComment({
+        content,
+        createdBy: currentUser?.username || "",
+        createdByName: currentUser?.name || "",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+  }
+  saveState();
+  renderPerformanceDialog(person, month);
+}
+
+function editPerformanceComment(section, id) {
+  const person = els.performanceDialog.dataset.person;
+  const month = els.performanceDialog.dataset.month;
+  const review = reviewForPersonMonth(person, month);
+  const comment = review?.[section]?.find((item) => item.id === id);
+  if (!comment || !canEditPerformanceComment(comment)) return;
+  const input = document.querySelector(section === "leaderComments" ? "#performanceLeaderInput" : "#performanceTeamLeadInput");
+  if (!input) return;
+  input.value = comment.content;
+  input.dataset.editId = comment.id;
+  const saveButton = els.performanceBody.querySelector(`button[data-action="save-performance-comment"][data-section="${section}"]`);
+  const cancelButton = els.performanceBody.querySelector(`button[data-action="cancel-performance-comment-edit"][data-section="${section}"]`);
+  if (saveButton) saveButton.textContent = "保存修改";
+  if (cancelButton) cancelButton.hidden = false;
+  input.focus();
+}
+
+function cancelPerformanceCommentEdit(section) {
+  const input = document.querySelector(section === "leaderComments" ? "#performanceLeaderInput" : "#performanceTeamLeadInput");
+  if (!input) return;
+  input.value = "";
+  delete input.dataset.editId;
+  const saveButton = els.performanceBody.querySelector(`button[data-action="save-performance-comment"][data-section="${section}"]`);
+  const cancelButton = els.performanceBody.querySelector(`button[data-action="cancel-performance-comment-edit"][data-section="${section}"]`);
+  if (saveButton) saveButton.textContent = section === "leaderComments" ? "提交考核" : "提交建议";
+  if (cancelButton) cancelButton.hidden = true;
+}
+
+function deletePerformanceComment(section, id) {
+  const person = els.performanceDialog.dataset.person;
+  const month = els.performanceDialog.dataset.month;
+  const review = reviewForPersonMonth(person, month);
+  if (!review) return;
+  const comment = review[section].find((item) => item.id === id);
+  if (!comment || !canEditPerformanceComment(comment) || !confirm("确认删除这条内容吗？")) return;
+  review[section] = review[section].filter((item) => item.id !== id);
+  saveState();
+  renderPerformanceDialog(person, month);
+}
+
 function renderHolidayMonthOptions() {
   const options = monthOptions();
   if (!options.some((option) => option.value === calendarEditMonth)) {
@@ -2587,6 +2855,7 @@ function handleGridClick(event) {
   if (button.dataset.action === "edit-other-work") openOtherWorkDialog(workItems.find((work) => work.id === id));
   if (button.dataset.action === "edit-own-work") openWorkDialog(workItems.find((work) => work.id === id), { lockAssignment: true });
   if (button.dataset.action === "edit-work") openWorkDialog(workItems.find((work) => work.id === id));
+  if (button.dataset.action === "open-performance-review") openPerformanceDialog(id, selectedMonth);
   if (button.dataset.action === "edit-requirement") openRequirementDialog(requirementById(id));
   if (button.dataset.action === "edit-version") openVersionDialog(versionById(id));
   if (button.dataset.action === "toggle-version") {
@@ -2704,6 +2973,7 @@ async function init() {
   requirements = (state.requirements || []).map(normalizeRequirement);
   versions = (state.versions || []).map(normalizeVersion).filter((version) => isValidDateKey(version.start) && isValidDateKey(version.end));
   workItems = (state.workItems || []).map(normalizeWork).filter((work) => work.requirementId && work.person && isValidDateKey(work.start) && isValidDateKey(work.end));
+  performanceReviews = (state.performanceReviews || []).map(normalizePerformanceReview).filter((review) => review.personName && review.month);
   holidays = new Set(state.holidays || []);
   workdays = new Set(state.workdays || []);
   ensurePeopleFromExistingData();
@@ -2866,6 +3136,20 @@ async function init() {
     removeWorkImage("other", Number(button.dataset.index));
   });
   els.closeWorkDetailDialog.addEventListener("click", () => els.workDetailDialog.close());
+  els.closePerformanceDialog.addEventListener("click", () => els.performanceDialog.close());
+  els.performanceBody.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+    const section = button.dataset.section;
+    const id = button.dataset.id;
+    if (action === "performance-work-detail") showWorkDetail(workItems.find((work) => work.id === id));
+    if (action === "save-performance-self") savePerformanceSelf();
+    if (action === "save-performance-comment") savePerformanceComment(section);
+    if (action === "edit-performance-comment") editPerformanceComment(section, id);
+    if (action === "delete-performance-comment") deletePerformanceComment(section, id);
+    if (action === "cancel-performance-comment-edit") cancelPerformanceCommentEdit(section);
+  });
   els.closeHolidayDialog.addEventListener("click", () => els.holidayDialog.close());
   els.cancelHolidayButton.addEventListener("click", () => els.holidayDialog.close());
   els.closePeopleDialog.addEventListener("click", () => els.peopleDialog.close());

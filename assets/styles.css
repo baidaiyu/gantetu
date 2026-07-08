@@ -1126,16 +1126,36 @@ input:disabled {
   justify-content: space-between;
 }
 
+.person-calendar-panel .month-title > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+}
+
 .person-calendar-panel .month-title strong {
   display: block;
   font-size: 18px;
 }
 
 .person-calendar-panel .month-title span {
+  flex-basis: 100%;
   color: var(--muted);
   display: block;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.performance-entry-button {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+  min-height: 32px;
+}
+
+.performance-entry-button:hover {
+  background: #0f1713;
+  border-color: #0f1713;
 }
 
 .person-work-bar {
@@ -1972,6 +1992,161 @@ button.calendar-admin-day:hover {
   overflow: hidden;
 }
 
+.performance-dialog-body {
+  max-width: min(1080px, calc(100vw - 40px));
+}
+
+.performance-body {
+  display: grid;
+  gap: 16px;
+}
+
+.performance-overview {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.performance-overview div {
+  background: #f7faf5;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.performance-overview b {
+  display: block;
+  font-size: 24px;
+}
+
+.performance-overview span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 750;
+  margin-top: 4px;
+}
+
+.performance-section {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.performance-section h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.performance-section textarea {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 110px;
+  padding: 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.performance-section textarea[readonly] {
+  color: var(--muted);
+}
+
+.performance-section-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.performance-work-list,
+.performance-comment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.performance-work-item,
+.performance-comment {
+  background: #f7faf5;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.performance-work-item div {
+  display: grid;
+  gap: 5px;
+}
+
+.performance-work-item strong {
+  font-size: 14px;
+}
+
+.performance-work-item span,
+.performance-comment-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.performance-work-link {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  font: inherit;
+  font-weight: 850;
+  padding: 0;
+  text-align: left;
+}
+
+.performance-work-link:hover,
+.performance-work-item .requirement-link:hover {
+  text-decoration: underline;
+}
+
+.performance-comment {
+  display: grid;
+  gap: 8px;
+}
+
+.performance-comment-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.performance-comment p {
+  line-height: 1.6;
+  margin: 0;
+}
+
+.performance-comment-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.performance-comment-actions button {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 850;
+  padding: 0;
+}
+
+.performance-comment-actions .danger-link {
+  color: var(--red);
+}
+
+.performance-empty {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .requirement-manager-item {
   align-items: center;
   background: #f7faf5;
@@ -2263,6 +2438,10 @@ button.calendar-admin-day:hover {
   .summary-strip,
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .performance-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dialog-actions {
