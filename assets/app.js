@@ -35,10 +35,11 @@ const versionPalette = [
 
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const calendarWeekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-const personRoles = ["领导", "产品经理", "设计师", "研发人员", "测试人员", "管理员"];
+const personRoles = ["领导", "组长", "产品经理", "设计师", "研发人员", "测试人员", "管理员"];
 const accountRoles = {
   admin: "管理员",
   leader: "领导",
+  teamLead: "组长",
   pm: "产品经理",
   designer: "设计师",
   developer: "研发人员",
@@ -424,6 +425,22 @@ function accountRoleLabel(role) {
 function currentUserRoles() {
   const roles = Array.isArray(currentUser?.roles) ? currentUser.roles.filter((role) => accountRoles[role]) : [];
   return roles.length ? unique(roles) : [currentUser?.role || "developer"];
+}
+
+function currentUserHasRole(role) {
+  return currentUserRoles().includes(role);
+}
+
+function switchableUserRoles() {
+  const roles = currentUserRoles();
+  const primaryRoles = roles.filter((role) => role !== "teamLead");
+  return primaryRoles.length ? primaryRoles : roles;
+}
+
+function defaultActiveRole(roles = currentUserRoles(), preferred = currentUser?.role) {
+  const switchable = roles.filter((role) => role !== "teamLead");
+  const candidates = switchable.length ? switchable : roles;
+  return candidates.includes(preferred) ? preferred : candidates[0] || "developer";
 }
 
 function normalizePerson(input) {
@@ -914,13 +931,15 @@ function renderCurrentUserBadge() {
     return;
   }
   const roles = currentUserRoles();
-  if (roles.length <= 1) {
-    els.currentUserBadge.textContent = `${currentUser.name} · ${accountRoleLabel(currentRole)}`;
+  const switchableRoles = switchableUserRoles();
+  const teamLeadText = currentUserHasRole("teamLead") ? " · 组长" : "";
+  if (switchableRoles.length <= 1) {
+    els.currentUserBadge.textContent = `${currentUser.name} · ${accountRoleLabel(defaultActiveRole(roles, currentRole))}${teamLeadText}`;
     return;
   }
-  els.currentUserBadge.innerHTML = `<span>${escapeHtml(currentUser.name)}</span><span aria-hidden="true">·</span><select id="userRoleSelect" aria-label="切换当前角色">${roles
+  els.currentUserBadge.innerHTML = `<span>${escapeHtml(currentUser.name)}</span><span aria-hidden="true">·</span><select id="userRoleSelect" aria-label="切换当前角色">${switchableRoles
     .map((role) => `<option value="${escapeHtml(role)}" ${role === currentRole ? "selected" : ""}>${escapeHtml(accountRoleLabel(role))}</option>`)
-    .join("")}</select>`;
+    .join("")}</select>${teamLeadText ? `<span aria-hidden="true">·</span><span>组长</span>` : ""}`;
 }
 
 function applyRolePermissions() {
@@ -2437,6 +2456,18 @@ function canEditPerformanceComment(comment) {
   return Boolean(currentUser && (comment.createdBy === currentUser.username || comment.createdByName === currentUser.name));
 }
 
+function canViewPerformancePrivate(person) {
+  return isCurrentUserPerson(person) || currentUserHasRole("teamLead") || currentUserHasRole("leader");
+}
+
+function canWriteTeamLeadPerformance() {
+  return currentUserHasRole("teamLead");
+}
+
+function canWriteLeaderPerformance() {
+  return currentUserHasRole("leader");
+}
+
 function monthVisibleDays(month) {
   const monthDate = parseMonth(month);
   return eachVisibleDay(startOfMonth(monthDate), endOfMonth(monthDate));
@@ -2535,6 +2566,7 @@ function performanceCommentRows(comments) {
 function exportPerformanceReport(person, month) {
   const review = normalizePerformanceReview(reviewForPersonMonth(person, month) || { personName: person, month });
   const overview = performanceOverview(person, month);
+  const canViewPrivate = canViewPerformancePrivate(person);
   const overviewRows = [
     ["姓名", person],
     ["月份", monthLabel(parseMonth(month))],
@@ -2557,13 +2589,18 @@ function exportPerformanceReport(person, month) {
     ["自我小结", review.selfSummary.content || "本人尚未填写自我小结"],
   ];
   const commentHeaders = [["填写人", "创建时间", "更新时间", "内容"]];
-  downloadExcelWorkbook(`月度绩效报告-${safeFilenamePart(person)}-${month}.xls`, [
+  const sheets = [
     { name: "工作概览", rows: overviewRows },
     { name: "本月工作列表", rows: workRows },
-    { name: "自我小结", rows: selfRows },
-    { name: "组长建议", rows: [...commentHeaders, ...performanceCommentRows(review.teamLeadComments)] },
-    { name: "领导考核", rows: [...commentHeaders, ...performanceCommentRows(review.leaderComments)] },
-  ]);
+  ];
+  if (canViewPrivate) {
+    sheets.push(
+      { name: "自我小结", rows: selfRows },
+      { name: "组长建议", rows: [...commentHeaders, ...performanceCommentRows(review.teamLeadComments)] },
+      { name: "领导考核", rows: [...commentHeaders, ...performanceCommentRows(review.leaderComments)] },
+    );
+  }
+  downloadExcelWorkbook(`月度绩效报告-${safeFilenamePart(person)}-${month}.xls`, sheets);
   showToast("success", "导出完成", `已导出 ${person} ${monthLabel(parseMonth(month))} 的月度绩效报告。`);
 }
 
@@ -2571,7 +2608,9 @@ function renderPerformanceDialog(person, month = selectedMonth) {
   const review = normalizePerformanceReview(reviewForPersonMonth(person, month) || { personName: person, month });
   const overview = performanceOverview(person, month);
   const selfEditable = isCurrentUserPerson(person);
-  const leaderEditable = currentRole === "leader";
+  const canViewPrivate = canViewPerformancePrivate(person);
+  const teamLeadEditable = canWriteTeamLeadPerformance();
+  const leaderEditable = canWriteLeaderPerformance();
   els.performanceDialog.dataset.person = person;
   els.performanceDialog.dataset.month = month;
   els.performanceTitle.textContent = `${person} · ${monthLabel(parseMonth(month))}`;
@@ -2585,11 +2624,14 @@ function renderPerformanceDialog(person, month = selectedMonth) {
         })
         .join("")
     : `<div class="performance-empty">本月暂无工作记录。</div>`;
+  const privateSections = canViewPrivate
+    ? `<section class="performance-section"><h3>自我小结</h3><textarea id="performanceSelfInput" ${selfEditable ? "" : "readonly"} placeholder="${selfEditable ? "填写本月自我小结" : "本人尚未填写自我小结"}">${escapeHtml(review.selfSummary.content)}</textarea><div class="performance-section-actions">${selfEditable ? `<button class="primary-action compact" type="button" data-action="save-performance-self">保存自我小结</button>` : `<span class="field-hint">只有本人可以编辑。</span>`}</div></section>
+    <section class="performance-section"><h3>组长考核建议</h3><div class="performance-comment-list">${renderPerformanceComments(review.teamLeadComments, "teamLeadComments")}</div>${teamLeadEditable ? `<textarea id="performanceTeamLeadInput" placeholder="填写组长考核建议"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="teamLeadComments">提交建议</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="teamLeadComments" hidden>取消编辑</button></div>` : `<div class="performance-empty">只有组长可以填写组长考核建议。</div>`}</section>
+    <section class="performance-section"><h3>领导考核区</h3><div class="performance-comment-list">${renderPerformanceComments(review.leaderComments, "leaderComments")}</div>${leaderEditable ? `<textarea id="performanceLeaderInput" placeholder="填写领导考核"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="leaderComments">提交考核</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="leaderComments" hidden>取消编辑</button></div>` : `<div class="performance-empty">只有领导可以填写领导考核。</div>`}</section>`
+    : "";
   els.performanceBody.innerHTML = `<section class="performance-overview"><div><b>${overview.entries.length}</b><span>参与工作</span></div><div><b>${overview.occupiedDays}/${overview.workdays}</b><span>占用工作日</span></div><div><b>${overview.percent}%</b><span>饱和度</span></div></section>
     <section class="performance-section"><h3>本月工作列表</h3><div class="performance-work-list">${workList}</div></section>
-    <section class="performance-section"><h3>自我小结</h3><textarea id="performanceSelfInput" ${selfEditable ? "" : "readonly"} placeholder="${selfEditable ? "填写本月自我小结" : "本人尚未填写自我小结"}">${escapeHtml(review.selfSummary.content)}</textarea><div class="performance-section-actions">${selfEditable ? `<button class="primary-action compact" type="button" data-action="save-performance-self">保存自我小结</button>` : `<span class="field-hint">只有本人可以编辑。</span>`}</div></section>
-    <section class="performance-section"><h3>组长考核建议</h3><div class="performance-comment-list">${renderPerformanceComments(review.teamLeadComments, "teamLeadComments")}</div><textarea id="performanceTeamLeadInput" placeholder="填写组长考核建议"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="teamLeadComments">提交建议</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="teamLeadComments" hidden>取消编辑</button></div></section>
-    <section class="performance-section"><h3>领导考核区</h3><div class="performance-comment-list">${renderPerformanceComments(review.leaderComments, "leaderComments")}</div>${leaderEditable ? `<textarea id="performanceLeaderInput" placeholder="填写领导考核"></textarea><div class="performance-section-actions"><button class="primary-action compact" type="button" data-action="save-performance-comment" data-section="leaderComments">提交考核</button><button class="secondary-action compact" type="button" data-action="cancel-performance-comment-edit" data-section="leaderComments" hidden>取消编辑</button></div>` : `<div class="performance-empty">只有当前角色为领导时可以填写领导考核。</div>`}</section>`;
+    ${privateSections}`;
 }
 
 function openPerformanceDialog(person, month = selectedMonth) {
@@ -2615,7 +2657,8 @@ function savePerformanceSelf() {
 function savePerformanceComment(section) {
   const person = els.performanceDialog.dataset.person;
   const month = els.performanceDialog.dataset.month;
-  if (section === "leaderComments" && currentRole !== "leader") return;
+  if (section === "teamLeadComments" && !canWriteTeamLeadPerformance()) return;
+  if (section === "leaderComments" && !canWriteLeaderPerformance()) return;
   const input = document.querySelector(section === "leaderComments" ? "#performanceLeaderInput" : "#performanceTeamLeadInput");
   const content = input?.value.trim() || "";
   if (!content) return;
@@ -2998,7 +3041,8 @@ function handleGridClick(event) {
 function render() {
   if (currentUser) {
     const roles = currentUserRoles();
-    if (!roles.includes(currentRole)) currentRole = roles.includes(currentUser.role) ? currentUser.role : roles[0];
+    const switchableRoles = switchableUserRoles();
+    if (!switchableRoles.includes(currentRole)) currentRole = defaultActiveRole(roles, currentUser.role);
     currentPerson = currentUser.name || "";
     els.roleSelect.value = currentRole;
   } else {
@@ -3075,7 +3119,7 @@ async function init() {
   }
   document.body.classList.remove("auth-view");
   const roles = currentUserRoles();
-  currentRole = roles.includes(currentUser.role) ? currentUser.role : roles[0];
+  currentRole = defaultActiveRole(roles, currentUser.role);
   currentPerson = currentUser.name || "";
   els.roleSelect.value = currentRole;
   const state = await loadState();
@@ -3102,7 +3146,7 @@ async function init() {
   els.currentUserBadge.addEventListener("input", (event) => {
     if (event.target.id !== "userRoleSelect") return;
     const nextRole = event.target.value;
-    if (!currentUserRoles().includes(nextRole)) return;
+    if (!switchableUserRoles().includes(nextRole)) return;
     currentRole = nextRole;
     personLoadManualSelection = false;
     selectedLoadPerson = "";

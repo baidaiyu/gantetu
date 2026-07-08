@@ -27,6 +27,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", DEFAULT_ACCOUNT_PASSWORD)
 ROLE_LABELS = {
     "admin": "管理员",
     "leader": "领导",
+    "teamLead": "组长",
     "pm": "产品经理",
     "designer": "设计师",
     "developer": "研发人员",
