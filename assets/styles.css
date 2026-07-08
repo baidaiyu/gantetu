@@ -1162,6 +1162,10 @@ input:disabled {
   --version-color: var(--green);
 }
 
+.pm-requirement-bar {
+  --version-color: var(--blue);
+}
+
 .calendar-admin {
   display: grid;
   gap: 12px;

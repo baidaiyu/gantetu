@@ -970,18 +970,22 @@ function isWorkingPersonName(name) {
   return normalizePersonRoles(person || {}).some((role) => role === "设计师" || role === "研发人员" || role === "测试人员");
 }
 
+function isProductManagerName(name) {
+  return personHasRole(name, "产品经理");
+}
+
 function workingPeople() {
   return allPeople().filter(isWorkingPersonName);
 }
 
 function reportPeople() {
-  return unique([...workingPeople(), ...workItems.map((work) => work.person).filter((name) => personByName(name))]).sort((a, b) =>
-    a.localeCompare(b, "zh-CN"),
+  return unique([...workingPeople(), ...allPeople().filter(isProductManagerName), ...workItems.map((work) => work.person).filter((name) => personByName(name))]).sort(
+    (a, b) => a.localeCompare(b, "zh-CN"),
   );
 }
 
 function isReportPersonName(name) {
-  return isWorkingPersonName(name) || workItems.some((work) => work.person === name && isOtherWorkRequirement(requirementById(work.requirementId)));
+  return isWorkingPersonName(name) || isProductManagerName(name) || workItems.some((work) => work.person === name && isOtherWorkRequirement(requirementById(work.requirementId)));
 }
 
 function visibleWorkerNames(names) {
@@ -1348,6 +1352,37 @@ function buildRequirementRows(reqs, visibleDays) {
     .sort((a, b) => `${a.primary}-${a.secondary}`.localeCompare(`${b.primary}-${b.secondary}`, "zh-CN"));
 }
 
+function requirementPmRange(req, visibleDays) {
+  const version = requirementVersion(req.id);
+  if (version && dateRangeOverlapsDays(version.start, version.end, visibleDays)) return { start: version.start, end: version.end, source: "version" };
+  const relatedWorks = workItems.filter((work) => work.requirementId === req.id && workOverlapsVisibleDays(work, visibleDays));
+  if (!relatedWorks.length) return null;
+  const starts = relatedWorks.map((work) => work.start).sort();
+  const ends = relatedWorks.map((work) => work.end).sort();
+  return { start: starts[0], end: ends[ends.length - 1], source: "work" };
+}
+
+function productManagerRequirementEntries(person, reqs, visibleDays, excludedRequirementIds = new Set()) {
+  if (!isProductManagerName(person)) return [];
+  return reqs
+    .filter((req) => req.createdByName === person && req.kind !== "other" && !excludedRequirementIds.has(req.id))
+    .map((req) => {
+      const range = requirementPmRange(req, visibleDays);
+      if (!range) return null;
+      const version = requirementVersion(req.id);
+      return {
+        id: req.id,
+        requirementId: req.id,
+        title: req.title,
+        link: req.link,
+        start: range.start,
+        end: range.end,
+        versionName: version?.name || "无目标版本",
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildPersonRows(reqs, visibleDays) {
   const personFilter = els.personFilter.value;
   const query = els.search.value.trim().toLowerCase();
@@ -1357,14 +1392,15 @@ function buildPersonRows(reqs, visibleDays) {
   return personNames
     .map((name) => {
       const personWorks = works.filter((work) => work.person === name);
+      const pmEntries = productManagerRequirementEntries(name, reqs, visibleDays, new Set(personWorks.map((work) => work.requirementId)));
       const dayWorks = {};
       visibleDays.forEach((date) => {
         const key = formatDate(date);
-        dayWorks[key] = personWorks.filter((work) => rangeContains(work, key));
+        dayWorks[key] = [...personWorks.filter((work) => rangeContains(work, key)), ...pmEntries.filter((entry) => rangeContains(entry, key))];
       });
       const occupiedDays = visibleDays.filter((date) => dayWorks[formatDate(date)].length).length;
       const percent = visibleDays.length ? Math.round((occupiedDays / visibleDays.length) * 100) : 0;
-      const workNames = unique(personWorks.map((work) => requirementById(work.requirementId)?.title || "未知需求"));
+      const workNames = unique([...personWorks.map((work) => requirementById(work.requirementId)?.title || "未知需求"), ...pmEntries.map((entry) => entry.title)]);
       const queryText = `${name} ${workNames.join(" ")}`.toLowerCase();
       return {
         type: "person-load",
@@ -1373,7 +1409,7 @@ function buildPersonRows(reqs, visibleDays) {
         secondary: `已占用 ${occupiedDays}/${visibleDays.length} 天`,
         meta: workNames.length ? `${workNames.length} 项工作` : "暂无工作安排",
         status: "进行中",
-        ranges: personWorks.map((work) => ({ start: work.start, end: work.end })),
+        ranges: [...personWorks.map((work) => ({ start: work.start, end: work.end })), ...pmEntries.map((entry) => ({ start: entry.start, end: entry.end }))],
         total: occupiedDays,
         totalLabel: `${percent}%`,
         dayWorks,
@@ -1501,7 +1537,7 @@ function renderPersonLoadView(reqs) {
         )
         .join("")
     : `<div class="empty-state people-empty">当前筛选下暂无人员工作安排。</div>`;
-  els.grid.innerHTML = `<div class="person-load-board"><section class="person-load-list">${leftHeader}<div class="person-load-list-body">${leftRows}</div></section><section class="person-load-detail">${renderPersonLoadDetail(selectedLoadPerson, visibleDays)}</section></div>`;
+  els.grid.innerHTML = `<div class="person-load-board"><section class="person-load-list">${leftHeader}<div class="person-load-list-body">${leftRows}</div></section><section class="person-load-detail">${renderPersonLoadDetail(selectedLoadPerson, visibleDays, reqs)}</section></div>`;
   const nextListBody = els.grid.querySelector(".person-load-list-body");
   if (nextListBody) {
     nextListBody.scrollTop = personLoadListScrollTop;
@@ -1515,20 +1551,26 @@ function renderPersonLoadView(reqs) {
   }
 }
 
-function renderPersonLoadDetail(person, visibleDays) {
+function renderPersonLoadDetail(person, visibleDays, reqs = filteredRequirements()) {
   if (!person) return `<div class="calendar-detail-placeholder person-placeholder">请点击左侧人员查看详情。</div>`;
   const monthDate = parseMonth(selectedMonth);
   const start = startOfMonth(monthDate);
   const end = endOfMonth(monthDate);
   const leading = (start.getDay() + 6) % 7;
   const days = eachCalendarDay(start, end);
-  const works = workItems.filter((work) => work.person === person);
-  const occupiedDays = visibleDays.filter((date) => works.some((work) => rangeContains(work, formatDate(date)))).length;
+  const reqIds = new Set(reqs.map((req) => req.id));
+  const works = workItems.filter((work) => work.person === person && reqIds.has(work.requirementId));
+  const pmEntries = productManagerRequirementEntries(person, reqs, visibleDays, new Set(works.map((work) => work.requirementId)));
+  const occupiedDays = visibleDays.filter((date) => {
+    const key = formatDate(date);
+    return works.some((work) => rangeContains(work, key)) || pmEntries.some((entry) => rangeContains(entry, key));
+  }).length;
   const percent = visibleDays.length ? Math.round((occupiedDays / visibleDays.length) * 100) : 0;
   return `<section class="month-panel person-calendar-panel"><div class="month-title"><div><strong>${escapeHtml(person)}</strong><button class="secondary-action compact performance-entry-button" type="button" data-action="open-performance-review" data-id="${escapeHtml(person)}">月度绩效考核</button><span>${monthLabel(start)} · 已占用 ${occupiedDays}/${visibleDays.length} 天 · ${percent}%</span></div></div><div class="month-grid">${calendarWeekdays.map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}${Array.from({ length: leading }, () => `<div class="calendar-day calendar-pad"></div>`).join("")}${days
     .map((date) => {
       const key = formatDate(date);
       const dayWorks = isHiddenDate(date) ? [] : works.filter((work) => rangeContains(work, key));
+      const dayPmEntries = isHiddenDate(date) ? [] : pmEntries.filter((entry) => rangeContains(entry, key));
       return `<div class="calendar-day ${isHiddenDate(date) ? "muted-day" : ""}"><div class="calendar-date">${date.getDate()}</div><div class="calendar-bars">${dayWorks
         .map((work) => {
           const req = requirementById(work.requirementId);
@@ -1536,6 +1578,8 @@ function renderPersonLoadDetail(person, visibleDays) {
           const action = canEditOtherWork(work) ? "edit-other-work" : canEditOwnWork(work) ? "edit-own-work" : "person-day-detail";
           return `<button class="calendar-version-bar person-work-bar" type="button" data-action="${action}" data-id="${escapeHtml(action === "person-day-detail" ? person : work.id)}" data-date="${key}" title="${escapeHtml(title)}">${escapeHtml(title)}</button>`;
         })
+        .join("")}${dayPmEntries
+        .map((entry) => `<button class="calendar-version-bar person-work-bar pm-requirement-bar" type="button" data-action="open-requirement-link" data-id="${escapeHtml(entry.requirementId)}" title="${escapeHtml(entry.versionName)}">${escapeHtml(entry.title)}</button>`)
         .join("")}</div></div>`;
     })
     .join("")}</div></section>`;
@@ -2414,10 +2458,11 @@ function performanceEntries(person, month) {
   if (personHasRole(person, "产品经理")) {
     const existingReqIds = new Set(entries.map((entry) => entry.requirementId));
     requirements
-      .filter((req) => req.createdByName === person && !existingReqIds.has(req.id) && requirementTouchesMonth(req, visibleDays))
+      .filter((req) => req.createdByName === person && req.kind !== "other" && !existingReqIds.has(req.id) && requirementTouchesMonth(req, visibleDays))
       .forEach((req) => {
+        const range = requirementPmRange(req, visibleDays);
+        if (!range) return;
         const version = requirementVersion(req.id);
-        const relatedWorks = workItems.filter((work) => work.requirementId === req.id && workOverlapsVisibleDays(work, visibleDays));
         entries.push({
           type: "requirement",
           id: req.id,
@@ -2425,8 +2470,8 @@ function performanceEntries(person, month) {
           title: req.title,
           link: req.link,
           versionName: version?.name || "无目标版本",
-          start: version?.start || relatedWorks[0]?.start || month,
-          end: version?.end || relatedWorks[0]?.end || month,
+          start: range.start,
+          end: range.end,
           status: req.status,
         });
       });
@@ -2438,14 +2483,12 @@ function performanceOverview(person, month) {
   const visibleDays = monthVisibleDays(month);
   const entries = performanceEntries(person, month);
   const occupiedDays = new Set();
-  workItems
-    .filter((work) => work.person === person && workOverlapsVisibleDays(work, visibleDays))
-    .forEach((work) => {
-      visibleDays.forEach((date) => {
-        const key = formatDate(date);
-        if (rangeContains(work, key)) occupiedDays.add(key);
-      });
+  entries.forEach((entry) => {
+    visibleDays.forEach((date) => {
+      const key = formatDate(date);
+      if (rangeContains(entry, key)) occupiedDays.add(key);
     });
+  });
   const percent = visibleDays.length ? Math.round((occupiedDays.size / visibleDays.length) * 100) : 0;
   return { entries, occupiedDays: occupiedDays.size, workdays: visibleDays.length, percent };
 }
@@ -2856,6 +2899,11 @@ function handleGridClick(event) {
   if (button.dataset.action === "edit-own-work") openWorkDialog(workItems.find((work) => work.id === id), { lockAssignment: true });
   if (button.dataset.action === "edit-work") openWorkDialog(workItems.find((work) => work.id === id));
   if (button.dataset.action === "open-performance-review") openPerformanceDialog(id, selectedMonth);
+  if (button.dataset.action === "open-requirement-link") {
+    const req = requirementById(id);
+    if (req?.link) window.open(req.link, "_blank", "noopener,noreferrer");
+    else if (canManageRequirement()) openRequirementDialog(req);
+  }
   if (button.dataset.action === "edit-requirement") openRequirementDialog(requirementById(id));
   if (button.dataset.action === "edit-version") openVersionDialog(versionById(id));
   if (button.dataset.action === "toggle-version") {
